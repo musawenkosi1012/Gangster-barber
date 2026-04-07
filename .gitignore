@@ -1,0 +1,22 @@
+# Syndicate Intelligence - Global Ignore
+.env
+.env*
+__pycache__/
+*.pyc
+venv/
+node_modules/
+.next/
+dist/
+build/
+.vercel
+.clerk/
+keyless.json
+
+# Logs & Diagnostics
+*.log
+*.txt
+backend/test_*.py
+backend/final_err*.txt
+backend/nslookup_out.txt
+backend/test_out.txt
+backend/test_ip_out.txt

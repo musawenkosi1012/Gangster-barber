@@ -1,0 +1,62 @@
+export default function Footer() {
+  return (
+    <footer className="bg-[#050505] pt-24 pb-10 px-6 md:px-10 text-[#555] text-[10px] font-bold leading-loose uppercase tracking-[0.3em] border-t border-white/5 relative z-10">
+      <div className="max-w-6xl mx-auto border-b border-white/5 pb-16 mb-12 flex flex-col md:flex-row justify-between items-start gap-12">
+        
+        {/* Barber Info */}
+        <div className="max-w-xs">
+          <div className="text-white text-2xl font-black tracking-tighter normal-case mb-4">
+            GANGSTER<span className="text-red-600">.</span>
+          </div>
+          <p className="text-white/40 normal-case tracking-normal text-xs leading-relaxed font-medium">
+            Premium grooming for the untouchable. Walk-ins welcome, appointments preferred.
+          </p>
+        </div>
+
+        {/* Location */}
+        <div className="flex flex-col gap-3 text-white/50">
+          <span className="text-white mb-1 underline underline-offset-4 decoration-red-600">Location</span>
+          <span className="normal-case tracking-normal text-xs">Senga, Nehosho</span>
+          <span className="normal-case tracking-normal text-xs">Gweru, Zimbabwe</span>
+        </div>
+
+        {/* Contact */}
+        <div className="flex flex-col gap-3 text-white/50">
+          <span className="text-white mb-1 underline underline-offset-4 decoration-red-600">Contact</span>
+          <a href="https://wa.me/263773772047" target="_blank" className="hover:text-red-600 transition normal-case tracking-normal text-xs">WhatsApp: +263 773 772 047</a>
+          <a href="https://instagram.com" target="_blank" className="hover:text-red-600 transition">Instagram</a>
+          <a href="https://tiktok.com" target="_blank" className="hover:text-red-600 transition">TikTok</a>
+        </div>
+
+        {/* Hours */}
+        <div className="flex flex-col gap-3 text-white/50">
+          <span className="text-white mb-1 underline underline-offset-4 decoration-red-600">Hours</span>
+          <span className="normal-case tracking-normal text-xs">Mon – Sun: 7am – 7pm</span>
+        </div>
+      </div>
+
+      {/* Copyright */}
+      <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        <span>&copy; {new Date().getFullYear()} Gangster Barber</span>
+        <a href="#hero" className="text-white hover:text-red-600 transition">Back to Top &uarr;</a>
+      </div>
+
+      {/* Developer Signature */}
+      <div className="max-w-6xl mx-auto mt-12 pt-8 border-t border-white/5">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-[9px] tracking-[0.2em] text-white/20 normal-case">
+          <span className="tracking-normal text-[10px]">
+            Want a website like this? Contact{" "}
+            <a href="mailto:sukanovtech@gmail.com" className="text-red-600/60 hover:text-red-500 transition underline underline-offset-2">sukanovtech@gmail.com</a>
+          </span>
+          <div className="flex flex-wrap items-center gap-4 text-white/25">
+            <a href="tel:+263773772047" className="hover:text-red-600 transition">+263 773 772 047</a>
+            <span className="text-white/10">|</span>
+            <a href="https://wa.me/263773772047" target="_blank" className="hover:text-red-600 transition">WhatsApp</a>
+            <span className="text-white/10">|</span>
+            <a href="https://instagram.com/sukaravtech" target="_blank" className="hover:text-red-600 transition">@sukaravtech</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+}
