@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { SignInButton, SignUpButton, Show, UserButton } from "@clerk/nextjs";
+import { SignInButton, SignUpButton, SignOutButton, Show, UserButton } from "@clerk/nextjs";
 
 
 
@@ -153,12 +153,11 @@ export default function Navbar() {
                 <Show when="signed-in">
                   <div className="flex items-center gap-4">
                     <UserButton />
-                    <Link 
-                      href="/book" 
-                      className="btn-booking"
-                    >
-                      Book Now
-                    </Link>
+                    <SignOutButton>
+                      <button className="btn-booking">
+                        Sign Out
+                      </button>
+                    </SignOutButton>
                   </div>
                 </Show>
 

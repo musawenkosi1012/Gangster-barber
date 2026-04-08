@@ -19,15 +19,66 @@ export default function BookPage() {
   const [bookingMode, setBookingMode] = useState<"automatic" | "custom">("automatic");
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "paynow_web" | "paynow_mobile">("cash");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [timeLeft, setTimeLeft] = useState<string>("");
   const [formData, setFormData] = useState({
     name: "",
     service: "Taper Fade",
   });
+  
+  const PRICES: Record<string, number> = {
+    "Taper Fade": 5.0,
+    "Lineup & Shape-Up": 4.0,
+    "The Full Gangster": 8.0,
+    "Beard Sculpt": 4.0
+  };
 
-  // Sync user name once loaded
+  // Sync user context and check active bookings
   useEffect(() => {
-    if (user && !formData.name) {
-      setFormData(prev => ({ ...prev, name: `${user.firstName || ""} ${user.lastName || ""}`.trim() }));
+    if (user) {
+      if (!formData.name) {
+        setFormData(prev => ({ ...prev, name: `${user.firstName || ""} ${user.lastName || ""}`.trim() }));
+      }
+      
+      const checkActiveBooking = async () => {
+        try {
+          const response = await syndicateFetch(`/api/book/user/${user.id}`);
+          if (response.ok) {
+            const bookings = await response.json();
+            // Find the closest upcoming booking
+            const activeBooking = bookings.find((b: any) => {
+               const bDate = b.booking_date || b.date;
+               if (!bDate) return false;
+               
+               try {
+                 const match = b.slot_time.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+                 let hours = 0; let mins = 0;
+                 if(match) {
+                   hours = parseInt(match[1]);
+                   mins = parseInt(match[2]);
+                   if (match[3] && match[3].toUpperCase() === 'PM' && hours < 12) hours += 12;
+                   if (match[3] && match[3].toUpperCase() === 'AM' && hours === 12) hours = 0;
+                 }
+                 const target = new Date(`${bDate}T00:00:00`);
+                 target.setHours(hours, mins, 0, 0);
+                 // Only return true if strictly active/future (allow 40 mins grace)
+                 return target.getTime() + (40 * 60 * 1000) > Date.now();
+               } catch(e) { return false; }
+            });
+            
+            if (activeBooking) {
+              setSelectedDate(activeBooking.booking_date || activeBooking.date);
+              setAllocatedSlot(activeBooking.slot_time);
+              setBookingStatus("success");
+            }
+          }
+        } catch (err) {
+          console.warn("No active bookings found or network error.");
+        }
+      };
+      
+      checkActiveBooking();
     }
   }, [user]);
 
@@ -62,6 +113,50 @@ export default function BookPage() {
     return () => clearInterval(interval);
   }, [selectedDate]);
 
+  useEffect(() => {
+    if (bookingStatus === "success" && allocatedSlot && selectedDate) {
+      const calculateTimeLeft = () => {
+        try {
+           const match = allocatedSlot.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+           let hours = 0; let mins = 0;
+           if(match) {
+             hours = parseInt(match[1]);
+             mins = parseInt(match[2]);
+             if (match[3] && match[3].toUpperCase() === 'PM' && hours < 12) hours += 12;
+             if (match[3] && match[3].toUpperCase() === 'AM' && hours === 12) hours = 0;
+           }
+           const target = new Date(`${selectedDate}T00:00:00`);
+           target.setHours(hours, mins, 0, 0);
+
+           const now = new Date();
+           const diff = target.getTime() - now.getTime();
+           
+           if (diff <= 0) {
+             setTimeLeft("IN PROGRESS...");
+             return;
+           }
+
+           const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+           const h = Math.floor((diff / (1000 * 60 * 60)) % 24);
+           const m = Math.floor((diff / 1000 / 60) % 60);
+           const s = Math.floor((diff / 1000) % 60);
+           
+           if (d > 0) {
+             setTimeLeft(`${d}d ${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`);
+           } else {
+             setTimeLeft(`${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`);
+           }
+        } catch(e) {
+           setTimeLeft("PENDING");
+        }
+      };
+      
+      calculateTimeLeft(); // initial call
+      const timer = setInterval(calculateTimeLeft, 1000);
+      return () => clearInterval(timer);
+    }
+  }, [bookingStatus, allocatedSlot, selectedDate]);
+
   const handleBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (bookingMode === "custom" && !selectedSlot) {
@@ -86,6 +181,41 @@ export default function BookPage() {
       if (!response.ok) throw new Error("Syndicate Booking Failed");
       
       const data = await response.json();
+      
+      // PayNow Integration
+      if (paymentMethod !== "cash") {
+        const paynowUrl = process.env.NEXT_PUBLIC_PAYNOW_URL || "http://localhost:8001";
+        const email = user?.primaryEmailAddress?.emailAddress || "guest@gangster.com";
+        const bookingId = data.id || Math.floor(Math.random() * 100000); // Fallback int if backend doesn't return ID
+        
+        const payResponse = await syndicateFetch(`${paynowUrl}/api/payments/initiate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            booking_id: bookingId,
+            customer_name: formData.name,
+            customer_email: email,
+            service: formData.service,
+            amount: PRICES[formData.service] || 5.0,
+            ...(paymentMethod === "paynow_mobile" ? { phone_number: phoneNumber } : {})
+          })
+        });
+        
+        if (payResponse.ok) {
+          const payData = await payResponse.json();
+          if (payData.success) {
+             if (payData.redirect_url) {
+                window.location.href = payData.redirect_url;
+                return; // Stop here and let redirect happen
+             } else if (payData.instructions) {
+                alert(`EcoCash: ${payData.instructions}`);
+             }
+          } else {
+             alert(`Payment Failed: ${payData.error}`);
+          }
+        }
+      }
+
       setAllocatedSlot(data.slot_time);
       setBookingStatus("success");
     } catch (err) {
@@ -121,10 +251,16 @@ export default function BookPage() {
             <div className="text-center py-8 relative z-20">
               <div className="w-20 h-20 bg-green-500/10 border border-green-500/20 text-green-500 rounded-2xl flex items-center justify-center mx-auto mb-8 text-3xl rotate-12">✓</div>
               <h2 className="text-3xl font-black mb-4 tracking-tighter">SUCCESS!</h2>
-              <p className="text-gray-400 mb-8 leading-relaxed">
+              <p className="text-gray-400 mb-6 leading-relaxed">
                 You&apos;ve secured a 40-minute slot for {selectedDate} at:<br />
                 <span className="text-white text-6xl font-black tracking-tighter mt-4 block">{allocatedSlot}</span>
               </p>
+              
+              <div className="bg-white/5 border border-white/10 rounded-2xl py-4 mb-8">
+                 <p className="text-[10px] font-black uppercase tracking-[0.3em] text-red-500 mb-1">Time to Target</p>
+                 <p className="text-3xl font-black tracking-widest text-white tabular-nums">{timeLeft || "..."}</p>
+              </div>
+
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
                 <Link href="/dashboard" className="btn-booking py-6 px-12 text-[11px]">Go to Dashboard</Link>
                 <Link href="/" className="py-6 px-12 text-[11px] font-bold tracking-widest uppercase border border-white/10 rounded-full hover:bg-white hover:text-black transition-all duration-500">Home</Link>
@@ -170,7 +306,7 @@ export default function BookPage() {
                     <button
                       key={d.full}
                       type="button"
-                      onClick={() => { setSelectedDate(d.full); setSelectedSlot(null); }}
+                      onClick={() => { setSelectedDate(d.full); setSelectedSlot(null); setBookingMode("custom"); }}
                       className={`flex flex-col items-center justify-center min-w-[70px] py-4 rounded-2xl border transition-all duration-500 ${selectedDate === d.full ? "bg-white text-black border-white shadow-xl scale-105" : "bg-white/5 border-white/5 text-white/40 hover:border-white/20"}`}
                     >
                       <span className="text-[9px] font-black uppercase tracking-tighter mb-1">{d.dayName}</span>
@@ -218,11 +354,13 @@ export default function BookPage() {
                         onClick={() => setSelectedSlot(slot.time)}
                         className={`
                           py-4 rounded-xl text-[11px] font-bold transition-all duration-300 relative overflow-hidden group border
-                          ${!slot.available ? "bg-white/5 text-white/5 border-transparent opacity-30 cursor-not-allowed" : ""}
-                          ${selectedSlot === slot.time ? "bg-red-600 text-white border-red-600 shadow-[0_0_20px_rgba(220,38,38,0.3)]" : "bg-white/10 hover:bg-white/20 text-white border-white/5 hover:border-white/20"}
+                          ${!slot.available ? "bg-black text-white/20 border-white/5 cursor-not-allowed opacity-50 relative" : ""}
+                          ${slot.available && selectedSlot === slot.time ? "bg-red-600 text-white border-red-600 shadow-[0_0_20px_rgba(220,38,38,0.3)]" : ""}
+                          ${slot.available && selectedSlot !== slot.time ? "bg-white/10 hover:bg-white/20 text-white border-white/5 hover:border-white/20" : ""}
                         `}
                       >
-                        {slot.time}
+                        <span className={!slot.available ? "line-through" : ""}>{slot.time}</span>
+                        {!slot.available && <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[7px] tracking-[0.2em] text-red-500 font-extrabold -rotate-12 bg-black/80 px-1 border border-red-500/20 rounded backdrop-blur-sm">BOOKED</span>}
                         {slot.available && selectedSlot !== slot.time && (
                           <div className="absolute inset-0 bg-gradient-to-tr from-red-600/0 via-red-600/0 to-red-600/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                         )}
@@ -236,6 +374,44 @@ export default function BookPage() {
                   )}
                 </div>
               )}
+
+              {/* Payment Method */}
+              <div className="flex flex-col gap-4">
+                <label className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 ml-1">Capital Transfer</label>
+                <div className="flex p-1 bg-white/5 border border-white/5 rounded-2xl gap-1">
+                  <button 
+                    type="button"
+                    onClick={() => setPaymentMethod("cash")}
+                    className={`flex-1 py-4 px-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-500 ${paymentMethod === "cash" ? "bg-white text-black shadow-xl" : "text-white/40 hover:text-white"}`}
+                  >
+                    Cash
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setPaymentMethod("paynow_web")}
+                    className={`flex-1 py-4 px-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-500 ${paymentMethod === "paynow_web" ? "bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.3)]" : "text-white/40 hover:text-white"}`}
+                  >
+                    Web
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setPaymentMethod("paynow_mobile")}
+                    className={`flex-1 py-4 px-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-500 ${paymentMethod === "paynow_mobile" ? "bg-green-600 text-white shadow-[0_0_15px_rgba(22,163,74,0.3)]" : "text-white/40 hover:text-white"}`}
+                  >
+                    EcoCash
+                  </button>
+                </div>
+                {paymentMethod === "paynow_mobile" && (
+                   <input 
+                      type="text" 
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      className="bg-white/5 border border-white/5 rounded-2xl px-6 py-4 outline-none focus:border-green-600 focus:bg-white/10 transition-all font-medium text-sm w-full mt-2"
+                      placeholder="EcoCash Phone (e.g. 077...)"
+                      required
+                    />
+                )}
+              </div>
 
               {/* Action Button */}
               <div className="flex flex-col gap-4 mt-2">

@@ -22,7 +22,7 @@ export const viewport = {
   initialScale: 1.0,
 };
 
-import { ClerkProvider, SignInButton, SignUpButton, Show, UserButton } from "@clerk/nextjs";
+import { ClerkProvider } from "@clerk/nextjs";
 
 export default function RootLayout({
   children,
