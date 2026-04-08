@@ -5,6 +5,7 @@ import Navbar from "@/components/Navbar";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { syndicateFetch } from "@/utils/api";
+import { useRouter } from "next/navigation";
 
 interface Slot {
   time: string;
@@ -13,6 +14,15 @@ interface Slot {
 
 export default function BookPage() {
   const { user, isLoaded } = useUser();
+  const router = useRouter();
+
+  // Route protection bypass for legacy middleware failure
+  useEffect(() => {
+    if (isLoaded && !user) {
+      router.push("/");
+    }
+  }, [user, isLoaded, router]);
+
   const [bookingStatus, setBookingStatus] = useState<"idle" | "booking" | "success" | "error">("idle");
   const [allocatedSlot, setAllocatedSlot] = useState<string | null>(null);
   const [availableSlots, setAvailableSlots] = useState<Slot[]>([]);
