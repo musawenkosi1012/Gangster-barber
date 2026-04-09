@@ -17,11 +17,13 @@ class BookingUpdate(BaseModel):
     service: Optional[str] = None
     slot_time: Optional[str] = None
     booking_date: Optional[date] = None
+    status: Optional[str] = None
 
 class Booking(BookingBase):
     id: int
     slot_time: str
     booking_date: date
+    status: str
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

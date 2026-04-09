@@ -5,7 +5,8 @@
 
 export async function syndicateFetch(endpoint: string, options: RequestInit = {}, retries = 3): Promise<Response> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-  const url = endpoint.startsWith("http") ? endpoint : `${apiUrl}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
+  const pathSeparator = endpoint.startsWith("/") ? "" : "/";
+  const url = endpoint.startsWith("http") ? endpoint : `${apiUrl}${pathSeparator}${endpoint}`;
 
   let lastError: any;
 

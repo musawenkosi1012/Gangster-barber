@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from ...schemas.booking import BookingCreate, Booking as BookingSchema, BookingUpdate
@@ -12,6 +13,9 @@ router = APIRouter()
 
 # Type alias for cleaner code
 db_dependency = Annotated[Session, Depends(get_db)]
+
+print(f"Booking model class: {Booking}")
+print(f"Booking table info: {Booking.__table__ if hasattr(Booking, '__table__') else 'No __table__'}")
 
 @router.post("/", response_model=BookingSchema, responses={
     400: {"description": "Requested slot is not available or date is in the past"},
@@ -116,10 +120,19 @@ def get_available_slots(db: db_dependency, booking_date: Optional[date] = None):
 @router.get("/", response_model=List[BookingSchema])
 def list_bookings(db: db_dependency, booking_date: Optional[date] = None):
     # Hide past bookings by default?
-    query = db.query(Booking)
-    if booking_date:
-        query = query.filter(Booking.booking_date == booking_date)
-    return query.order_by(Booking.booking_date.desc(), Booking.slot_time.asc()).all()
+    result = db.execute(text("SELECT id, name, service, slot_time, booking_date, status, created_at FROM bookings ORDER BY booking_date DESC"))
+    bookings = []
+    for row in result:
+        bookings.append({
+            "id": row[0],
+            "name": row[1],
+            "service": row[2],
+            "slot_time": row[3],
+            "booking_date": row[4],
+            "status": row[5],
+            "created_at": row[6]
+        })
+    return bookings
 
 @router.get("/user/{user_id}", response_model=List[BookingSchema])
 def get_user_bookings(user_id: str, db: db_dependency):

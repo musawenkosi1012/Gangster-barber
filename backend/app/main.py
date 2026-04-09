@@ -5,7 +5,9 @@ from .core.config import settings
 from .db.base import init_db
 
 # Initialize Database Tables
+print(f"DATABASE_URL being used: {settings.DATABASE_URL}")
 init_db()
+print("init_db done")
 
 app = FastAPI(title=settings.APP_NAME)
 

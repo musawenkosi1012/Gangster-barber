@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { SignInButton, SignUpButton, SignOutButton, Show, UserButton } from "@clerk/nextjs";
+import { SignInButton, SignOutButton, Show, UserButton } from "@clerk/nextjs";
 
 
 
@@ -244,19 +244,19 @@ export default function Navbar() {
                 <span className="w-10 h-10 rounded-full bg-green-500/10 border border-green-500/20 flex items-center justify-center">
                   <WhatsAppIcon />
                 </span>
-                WhatsApp
+                <span>WhatsApp</span>
               </a>
               <a href="tel:+263773772047" className="flex items-center gap-2 text-white/40 hover:text-white/70 transition-colors text-xs font-bold tracking-wider uppercase">
                 <span className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
                   <PhoneIcon />
                 </span>
-                Call
+                <span>Call</span>
               </a>
               <a href="https://instagram.com/sukaravtech" target="_blank" className="flex items-center gap-2 text-white/40 hover:text-pink-400/70 transition-colors text-xs font-bold tracking-wider uppercase">
                 <span className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
                   <InstagramIcon />
                 </span>
-                Insta
+                <span>Insta</span>
               </a>
             </div>
             <p className="text-center text-white/15 text-[10px] tracking-widest uppercase mt-6">Senga, Nehosho, Gweru</p>

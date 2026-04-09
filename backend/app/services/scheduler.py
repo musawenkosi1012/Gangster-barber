@@ -31,7 +31,20 @@ class SchedulerService:
     def get_booked_times(self, db: Session, target_date: date) -> List[time]:
         """Returns a list of already booked times for a specific date using ORM."""
         bookings = db.query(Booking).filter(Booking.booking_date == target_date).all()
-        return [datetime.strptime(b.slot_time, "%H:%M").time() for b in bookings]
+        booked_times = []
+        for b in bookings:
+            try:
+                # Try standard format first
+                t = datetime.strptime(b.slot_time, "%H:%M").time()
+                booked_times.append(t)
+            except ValueError:
+                try:
+                    # Try format with AM/PM if that's what's in the DB
+                    t = datetime.strptime(b.slot_time.strip(), "%I:%M %p").time()
+                    booked_times.append(t)
+                except ValueError:
+                    print(f"Warning: Could not parse slot_time '{b.slot_time}'")
+        return booked_times
 
     def allocate_next_available(self, db: Session) -> Optional[Dict[str, any]]:
         """

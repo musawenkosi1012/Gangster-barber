@@ -1,122 +1,124 @@
-from fastapi import APIRouter, HTTPException, Request
-from schemas import InitiatePaymentRequest, CheckStatusRequest, PaymentResponse
-from paynow_client import get_paynow_client
+from fastapi import APIRouter, Request, HTTPException, Response
+from fastapi.responses import JSONResponse
 import logging
-
-logger = logging.getLogger(__name__)
+import hashlib
+import os
+import httpx
+from typing import Optional, List
+from paynow_client import get_paynow_client
+from schemas import InitiatePaymentRequest, PaymentResponse, OmariOTPRequest
 
 router = APIRouter()
+logger = logging.getLogger("paynow")
 
-
-@router.post("/initiate", response_model=PaymentResponse)
-async def initiate_payment(req: InitiatePaymentRequest):
+async def notify_backend_of_payment(booking_id: str, status: str):
     """
-    Initiates a Paynow payment for a barber booking.
-
-    - If `phone_number` is provided → EcoCash mobile payment.
-    - Otherwise → Web-based redirect payment.
+    Internal bridge to sync payment status with the main core backend (Port 8000).
     """
-    paynow = get_paynow_client()
-
-    # Build the payment reference: booking ID + service name
-    reference = f"Booking #{req.booking_id} - {req.service}"
-
-    # Create the payment object
-    payment = paynow.create_payment(reference, req.customer_email)
-
-    # Add the service item with its price
-    service_label = f"{req.service} (Gangster Barber)"
-    payment.add(service_label, req.amount)
-
+    backend_url = os.getenv("BACKEND_API_URL", "http://localhost:8000")
     try:
-        # --- Mobile (EcoCash) Payment ---
-        if req.phone_number:
-            phone = req.phone_number.strip().replace(" ", "")
-            logger.info(f"Sending mobile payment to {phone} for booking #{req.booking_id}")
-            response = paynow.send_mobile(payment, phone, "ecocash")
-
-            if response.success:
-                return PaymentResponse(
-                    success=True,
-                    poll_url=response.poll_url,
-                    instructions=response.instructions,
-                    payment_method="mobile",
-                )
+        async with httpx.AsyncClient() as client:
+            # reference field in Paynow is our Booking ID
+            response = await client.patch(
+                f"{backend_url}/api/book/{booking_id}",
+                json={"status": "PAID"}
+            )
+            if response.status_code == 200:
+                logger.info(f"🔗 Successfully linked booking {booking_id} to PAID status.")
             else:
-                logger.error(f"Mobile payment failed: {response.error}")
-                return PaymentResponse(
-                    success=False,
-                    error=str(response.error),
-                    payment_method="mobile",
-                )
-
-        # --- Web (Redirect) Payment ---
-        else:
-            logger.info(f"Sending web payment for booking #{req.booking_id}")
-            response = paynow.send(payment)
-
-            if response.success:
-                return PaymentResponse(
-                    success=True,
-                    redirect_url=response.redirect_url,
-                    poll_url=response.poll_url,
-                    payment_method="web",
-                )
-            else:
-                logger.error(f"Web payment failed: {response.error}")
-                return PaymentResponse(
-                    success=False,
-                    error=str(response.error),
-                    payment_method="web",
-                )
-
+                logger.warning(f"⚠️ Failed to link booking {booking_id}. Core responded with {response.status_code}")
     except Exception as e:
-        logger.exception(f"Unexpected error during payment initiation: {e}")
-        raise HTTPException(status_code=500, detail=f"Payment initiation failed: {str(e)}")
-
-
-@router.post("/check-status")
-async def check_payment_status(req: CheckStatusRequest):
-    """
-    Polls the Paynow API to check the current status of a transaction.
-    Use the poll_url returned from /initiate.
-    """
-    paynow = get_paynow_client()
-
-    try:
-        status = paynow.check_transaction_status(req.poll_url)
-        return {
-            "paid": status.paid,
-            "status": status.status,
-        }
-    except Exception as e:
-        logger.exception(f"Failed to check transaction status: {e}")
-        raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
-
+        logger.error(f"❌ Core Link Error: {e}")
 
 @router.post("/webhook")
 async def paynow_webhook(request: Request):
     """
-    Receives payment status updates from Paynow (result URL callback).
-    Paynow POSTs form-encoded data here when a payment status changes.
-    Log it and return 200 OK.
+    Receives and VERIFIES payment status updates from Paynow.
+    Implements SHA512 hash verification as per Paynow documentation.
     """
-    form = await request.form()
-    data = dict(form)
-    logger.info(f"PayNow Webhook received: {data}")
+    try:
+        paynow = get_paynow_client()
+        form = await request.form()
+        data = dict(form)
+        
+        provided_hash = None
+        verify_string = ""
+        
+        for key, value in form.items():
+            if key.lower() == 'hash':
+                provided_hash = value
+                continue
+            verify_string += str(value)
+        
+        if not provided_hash:
+            return JSONResponse(status_code=400, content={"error": "Missing Hash"})
 
-    # You can extend this to update a booking status in your main backend DB
-    # Example: call main backend's PATCH /api/book/{booking_id} here
+        verify_string += paynow.integration_key
+        calculated_hash = hashlib.sha512(verify_string.encode('utf-8')).hexdigest().upper()
 
-    return {"received": True}
+        if calculated_hash != provided_hash:
+            logger.warning("SECURITY ALERT: Webhook hash mismatch.")
+            return JSONResponse(status_code=401, content={"error": "Invalid Hash Signature"})
 
+        status = (data.get('Status') or data.get('status') or "").lower()
+        booking_id = data.get('Reference') or data.get('reference')
+        
+        if status in ["paid", "awaiting delivery", "delivered"]:
+             if booking_id:
+                 await notify_backend_of_payment(booking_id, "PAID")
+            
+        return {"status": "verified", "reference": booking_id}
 
-@router.get("/services")
-def list_services():
-    """Returns available barber services with their prices (in USD)."""
-    return [
-        {"name": "Taper Fade",       "price": 5.00},
-        {"name": "Lineup & Shape-Up", "price": 4.00},
-        {"name": "The Full Gangster", "price": 8.00},
-        {"name": "Beard Sculpt",      "price": 4.00},
-    ]
+    except Exception as e:
+        logger.exception(f"Unexpected error in Paynow webhook: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.post("/initiate", response_model=PaymentResponse)
+async def initiate_payment(req: InitiatePaymentRequest):
+    """
+    Advanced Initiate: Supports Mobile, InnBucks, and O'mari Express Flows.
+    """
+    try:
+        paynow = get_paynow_client()
+        payment = paynow.create_payment(str(req.booking_id), req.customer_email)
+        payment.add(f"Appointment #{req.booking_id}", req.amount)
+
+        method_map = {
+            "mobile": "ecocash",
+            "onemoney": "onemoney",
+            "innbucks": "innbucks",
+            "omari": "omari"
+        }
+        
+        paynow_method = method_map.get(req.payment_method)
+        
+        if paynow_method:
+            response = paynow.send_mobile(payment, req.phone_number, paynow_method)
+        else:
+            response = paynow.send(payment)
+
+        if response.success:
+            return PaymentResponse(
+                success=True,
+                status="sent",
+                redirect_url=response.redirect_url,
+                poll_url=response.poll_url,
+                instructions=response.instructions,
+                authorization_code=getattr(response, 'authorization_code', None),
+                otpreference=getattr(response, 'otpreference', None)
+            )
+        else:
+            return PaymentResponse(success=False, error=response.error)
+            
+    except Exception as e:
+        logger.error(f"Initiation Failure: {e}")
+        raise HTTPException(status_code=500, detail="Terminal failure during payment initiation.")
+
+@router.post("/check-status", response_model=PaymentResponse)
+async def check_status(poll_url: str):
+    try:
+        paynow = get_paynow_client()
+        status = paynow.check_transaction_status(poll_url)
+        return PaymentResponse(success=True, status=status.status, poll_url=poll_url)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

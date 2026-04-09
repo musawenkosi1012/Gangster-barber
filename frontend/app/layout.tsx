@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 
 export const viewport = {
   width: "device-width",
-  initialScale: 1.0,
+  initialScale: 1,
 };
 
 import { ClerkProvider } from "@clerk/nextjs";

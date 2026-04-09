@@ -9,7 +9,9 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const easeInOutCubic = (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
 // ─── Optimized Assets (Adaptive Level of Detail) ───
-export const createStraightRazor = (disposables: Set<THREE.BufferGeometry | THREE.Material | THREE.Texture>) => {
+export type ThreeDisposable = THREE.BufferGeometry | THREE.Material | THREE.Texture;
+
+export const createStraightRazor = (disposables: Set<ThreeDisposable>) => {
   const razor = new THREE.Group();
   const matGold = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.2 });
   const matSteel = new THREE.MeshStandardMaterial({ color: 0xe0e0e0, metalness: 0.9, roughness: 0.1 });
@@ -54,15 +56,15 @@ export const createClipper = (
   bodyColor: number,
   accentColor: number,
   bladeColor: number,
-  disposables: Set<THREE.BufferGeometry | THREE.Material | THREE.Texture>
+  disposables: Set<ThreeDisposable>
 ) => {
-  const isMob = typeof window !== 'undefined' && window.innerWidth < 768;
+  const isMob = globalThis.window !== undefined && globalThis.window.innerWidth < 768;
   const Mat = isMob ? THREE.MeshStandardMaterial : THREE.MeshPhysicalMaterial;
   const clipper = new THREE.Group();
 
   const s = new THREE.Shape();
-  s.moveTo(-0.5, -2.0);
-  s.quadraticCurveTo(0.6, -2.0, 0.65, -1.8);
+  s.moveTo(-0.5, -2);
+  s.quadraticCurveTo(0.6, -2, 0.65, -1.8);
   s.lineTo(0.7, -0.5);
   s.lineTo(0.6, 1.5);
   s.quadraticCurveTo(0.55, 1.9, 0.4, 1.9);
@@ -70,7 +72,7 @@ export const createClipper = (
   s.quadraticCurveTo(-0.55, 1.9, -0.6, 1.5);
   s.lineTo(-0.7, -0.5);
   s.lineTo(-0.65, -1.8);
-  s.quadraticCurveTo(-0.65, -2.0, -0.5, -2.0);
+  s.quadraticCurveTo(-0.65, -2, -0.5, -2);
 
   const extrude = {
     depth: 0.5,
@@ -90,7 +92,7 @@ export const createClipper = (
     color: bodyColor,
     metalness: isMob ? 0.4 : 0.95,
     roughness: isMob ? 0.4 : 0.05,
-    ...(isMob ? {} : { clearcoat: 1.0, envMapIntensity: 2.5 })
+    ...(isMob ? {} : { clearcoat: 1, envMapIntensity: 2.5 })
   });
   disposables.add(bodyMat);
 
@@ -101,9 +103,9 @@ export const createClipper = (
 
   const bladeMat = new Mat({
     color: bladeColor,
-    metalness: 1.0,
+    metalness: 1,
     roughness: 0.02,
-    ...(isMob ? {} : { clearcoat: 1.0, envMapIntensity: 4.0 })
+    ...(isMob ? {} : { clearcoat: 1, envMapIntensity: 4 })
   });
   disposables.add(bladeMat);
 
@@ -129,7 +131,7 @@ export const createClipper = (
 
 export default function ThreeScene() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const disposables = useRef(new Set<THREE.BufferGeometry | THREE.Material | THREE.Texture>());
+  const disposables = useRef(new Set<ThreeDisposable>());
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -193,7 +195,7 @@ export default function ThreeScene() {
     const ambientLight = new THREE.AmbientLight(0xffffff, isMobile ? 2.5 : 0.4); 
     scene.add(ambientLight);
 
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x000000, isMobile ? 3.0 : 0.6);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x000000, isMobile ? 3 : 0.6);
     scene.add(hemiLight);
 
     const mainSpot = new THREE.SpotLight(0xffffff, 0, 100, Math.PI * 0.15, 0.5, 0.5);
@@ -262,7 +264,7 @@ export default function ThreeScene() {
 
     const state = {
       camX: 0, camZ: isMobile ? 14 : 10,
-      heroIntensity: 0, redIntensity: 2.0,
+      heroIntensity: 0, redIntensity: 2,
     };
 
     lenis.on('scroll', (e: any) => {
@@ -280,6 +282,45 @@ export default function ThreeScene() {
     window.addEventListener("resize", updRes);
     updRes();
 
+    const applyPhase1 = (t: number, tNow: number, xOff: number, yOff: number) => {
+      clipper1.position.set(xOff, yOff, 0);
+      clipper1.rotation.set(0.1, tNow * 0.3 + t * Math.PI * 0.2, 0.1);
+      state.camX = 0; 
+      state.heroIntensity = lerp(isMobile ? 40 : 20, isMobile ? 120 : 80, easeInOutCubic(t));
+    };
+
+    const applyPhase2 = (t: number, xOff: number, yOff: number) => {
+      const e = easeInOutCubic(t);
+      clipper1.position.set(lerp(0, isMobile ? -0.8 : -5, e) + xOff, yOff, 0);
+      state.camX = lerp(0, isMobile ? 1 : 1.8, e);
+      state.heroIntensity = isMobile ? 120 : 80;
+    };
+
+    const applyPhase3 = (t: number, xOff: number, yOff: number) => {
+      const e = easeInOutCubic(t);
+      clipper1.position.set(
+        lerp(isMobile ? -0.8 : -5, 0, e) + xOff, 
+        lerp(0, isMobile ? -0.5 : -1, e) + yOff, 
+        lerp(0, isMobile ? 6 : 5, e)
+      );
+      state.camZ = lerp(isMobile ? 14 : 10, isMobile ? 10 : 8, e);
+      state.redIntensity = lerp(2, isMobile ? 25 : 18, e); // Brighter red for mobile
+    };
+
+    const applyScrollEffects = (progress: number, tNow: number, xOff: number, yOff: number) => {
+      if (progress <= 0.3) {
+        applyPhase1(progress / 0.3, tNow, xOff, yOff);
+        return;
+      }
+      
+      if (progress <= 0.65) {
+        applyPhase2((progress - 0.3) / 0.35, xOff, yOff);
+        return;
+      }
+      
+      applyPhase3((progress - 0.65) / 0.35, xOff, yOff);
+    };
+
     const animate = () => {
       animId = requestAnimationFrame(animate);
       const now = performance.now();
@@ -293,31 +334,7 @@ export default function ThreeScene() {
       const fX = Math.sin(time * 0.4) * 0.08;
       const fY = Math.cos(time * 0.3) * 0.12;
 
-      if (currentProgress <= 0.3) {
-        const t = currentProgress / 0.3;
-        clipper1.position.set(fX, fY, 0);
-        clipper1.rotation.set(0.1, time * 0.3 + t * Math.PI * 0.2, 0.1);
-        state.camX = 0; 
-        state.heroIntensity = lerp(isMobile ? 40 : 20, isMobile ? 120 : 80, easeInOutCubic(t));
-      } 
-      else if (currentProgress <= 0.65) {
-        const t = (currentProgress - 0.3) / 0.35;
-        const e = easeInOutCubic(t);
-        clipper1.position.set(lerp(0, isMobile ? -0.8 : -5, e) + fX, fY, 0);
-        state.camX = lerp(0, isMobile ? 1.0 : 1.8, e);
-        state.heroIntensity = isMobile ? 120 : 80;
-      }
-      else {
-        const t = (currentProgress - 0.65) / 0.35;
-        const e = easeInOutCubic(t);
-        clipper1.position.set(
-          lerp(isMobile ? -0.8 : -5, 0, e) + fX, 
-          lerp(0, isMobile ? -0.5 : -1, e) + fY, 
-          lerp(0, isMobile ? 6 : 5, e)
-        );
-        state.camZ = lerp(isMobile ? 14 : 10, isMobile ? 10 : 8, e);
-        state.redIntensity = lerp(2.0, isMobile ? 25 : 18, e); // Brighter red for mobile
-      }
+      applyScrollEffects(currentProgress, time, fX, fY);
 
       camera.position.x = lerp(camera.position.x, state.camX, 0.1);
       camera.position.z = lerp(camera.position.z, state.camZ, 0.1);

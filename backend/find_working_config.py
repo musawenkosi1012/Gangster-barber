@@ -4,9 +4,13 @@ import os
 
 load_dotenv()
 
-USER = "postgres.luseceypnzarplfnxekj"
-PASSWORD = "Dad@305581."
-DBNAME = "postgres"
+USER = os.getenv("user")
+PASSWORD = os.getenv("password")
+DBNAME = os.getenv("dbname")
+
+if not all([USER, PASSWORD, DBNAME]):
+    print("Error: Missing database credentials in environment variables.")
+    exit(1)
 
 test_configs = [
     {"host": "aws-0-eu-west-1.pooler.supabase.com", "port": 5432},
