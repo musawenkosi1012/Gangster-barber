@@ -126,7 +126,7 @@ const handlePaynowAction = (payData: any): boolean => {
 };
 
 const processPayment = async (paymentMethod: string, user: any, formData: any, bookingId: number, phoneNumber: string): Promise<boolean> => {
-  const paynowUrl = process.env.NEXT_PUBLIC_PAYNOW_URL || "http://localhost:8001";
+  const paynowUrl = process.env.NEXT_PUBLIC_PAYNOW_URL || "";
   const method = paymentMethod.replace("paynow_", "");
   const payload = buildPaymentPayload(method, bookingId, formData, user, phoneNumber);
 
