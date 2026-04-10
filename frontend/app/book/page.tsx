@@ -80,14 +80,14 @@ const calculateTimeDifference = (targetDate: Date): string => {
   return `${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
 };
 
-const buildPaymentPayload = (method: string, bookingId: number, formData: any, user: any, phoneNumber: string) => {
+const buildPaymentPayload = (method: string, bookingId: number, formData: any, user: any, phoneNumber: string, amount: number) => {
   const email = user?.primaryEmailAddress?.emailAddress || "guest@gangster.com";
   const payload: any = {
     booking_id: bookingId,
     customer_name: formData.name,
     customer_email: email,
     service: formData.service,
-    amount: BOOKING_DEPOSIT,
+    amount,
     payment_method: method
   };
 
@@ -125,10 +125,10 @@ const handlePaynowAction = (payData: any): boolean => {
   return false;
 };
 
-const processPayment = async (paymentMethod: string, user: any, formData: any, bookingId: number, phoneNumber: string): Promise<boolean> => {
+const processPayment = async (paymentMethod: string, user: any, formData: any, bookingId: number, phoneNumber: string, amount: number): Promise<boolean> => {
   const paynowUrl = process.env.NEXT_PUBLIC_PAYNOW_URL || "";
   const method = paymentMethod.replace("paynow_", "");
-  const payload = buildPaymentPayload(method, bookingId, formData, user, phoneNumber);
+  const payload = buildPaymentPayload(method, bookingId, formData, user, phoneNumber, amount);
 
   try {
     const response = await syndicateFetch(`${paynowUrl}/api/payments/initiate`, {
@@ -322,6 +322,7 @@ export default function BookPage() {
   const [isSlotsLoading, setIsSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState(false);
   const [formData, setFormData] = useState({ name: "", service: "" });
+  const [payForCut, setPayForCut] = useState(false);
 
   useEffect(() => {
     if (isLoaded && !user) router.push("/");
@@ -392,12 +393,16 @@ export default function BookPage() {
       const data = await response.json();
       
       // Critical: Ensure the payment microservice gets the actual service name
+      const payAmount = payForCut
+        ? BOOKING_DEPOSIT + (selectedService?.price || 0)
+        : BOOKING_DEPOSIT;
       const redirected = await processPayment(
         paymentMethod, 
         user, 
         { ...formData, service: finalService }, 
         data.id || 0, 
-        phoneNumber
+        phoneNumber,
+        payAmount
       );
       
       if (redirected) return;
@@ -473,24 +478,68 @@ export default function BookPage() {
                    <div className="space-y-6">
                       <div className="flex p-5 bg-red-600/10 border border-red-600/20 rounded-2xl mb-4">
                         <p className="text-[9px] font-black uppercase tracking-[0.2em] text-red-500 leading-relaxed">
-                          Mission Detail: A ${BOOKING_DEPOSIT} reservation fee is required to secure your slot. The remaining service balance is payable at the shop.
+                          Mission Detail: A ${BOOKING_DEPOSIT} reservation fee is required to secure your slot. The remaining service balance can be paid now or at the shop.
                         </p>
                       </div>
+
+                      {/* Pay for cut checkbox */}
+                      <label className="flex items-start gap-4 p-5 bg-white/[0.03] border border-white/10 rounded-2xl cursor-pointer group hover:border-white/20 transition-all duration-300">
+                        <div className="relative mt-0.5 shrink-0">
+                          <input
+                            type="checkbox"
+                            className="sr-only"
+                            checked={payForCut}
+                            onChange={(e) => setPayForCut(e.target.checked)}
+                          />
+                          <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all duration-300 ${
+                            payForCut
+                              ? 'bg-red-600 border-red-600'
+                              : 'bg-transparent border-white/20 group-hover:border-white/40'
+                          }`}>
+                            {payForCut && (
+                              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Also pay for my cut now</span>
+                          <span className="text-[9px] font-medium text-white/30 uppercase tracking-widest">
+                            Pay ${selectedService?.price} service fee upfront — saves time at the shop
+                          </span>
+                        </div>
+                        <span className={`ml-auto text-sm font-black shrink-0 transition-colors duration-300 ${
+                          payForCut ? 'text-red-500' : 'text-white/20'
+                        }`}>
+                          ${selectedService?.price}
+                        </span>
+                      </label>
 
                       {selectedService && (
                         <div className="bg-white/5 border border-white/5 rounded-2xl p-6 space-y-4">
                            <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/40">
-                              <span>Service ({selectedService.name})</span>
-                              <span>${selectedService.price}</span>
+                              <span>Booking Fee (required)</span>
+                              <span className="text-white">${BOOKING_DEPOSIT}</span>
                            </div>
-                           <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/40">
-                              <span>Reservation Fee</span>
-                              <span>+ ${BOOKING_DEPOSIT}</span>
-                           </div>
+                           {payForCut && (
+                             <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/40">
+                                <span>Service — {selectedService.name}</span>
+                                <span>+ ${selectedService.price}</span>
+                             </div>
+                           )}
+                           {!payForCut && (
+                             <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/20 italic">
+                                <span>Service — {selectedService.name}</span>
+                                <span>Pay at shop</span>
+                             </div>
+                           )}
                            <div className="h-px bg-white/10"></div>
                            <div className="flex justify-between text-base font-black uppercase tracking-widest text-white">
                               <span>Total to Pay Now</span>
-                              <span className="text-red-600">${selectedService.price + BOOKING_DEPOSIT}</span>
+                              <span className="text-red-600">
+                                ${payForCut ? selectedService.price + BOOKING_DEPOSIT : BOOKING_DEPOSIT}
+                              </span>
                            </div>
                         </div>
                       )}
