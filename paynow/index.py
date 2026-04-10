@@ -1,1 +1,1 @@
-from paynow.main import app
+from main import app
