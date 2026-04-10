@@ -7,6 +7,7 @@ import Link from "next/link";
 import { syndicateFetch } from "@/utils/api";
 import { useRouter } from "next/navigation";
 import { BRAND } from "@/utils/constants";
+import Image from "next/image";
 
 interface Service {
   id: number;

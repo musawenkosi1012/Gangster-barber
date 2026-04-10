@@ -63,7 +63,7 @@ export default function RootLayout({
               formFieldErrorText: "text-red-500 font-bold text-[10px] uppercase tracking-widest mt-2 ml-1",
             }
           }}
-          unsafe_disableDevelopmentModeWarnings
+          unsafe_disableDevelopmentModeConsoleWarning
         >
           <div className="grain"></div>
           {children}
