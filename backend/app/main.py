@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from .api.endpoints.bookings import router as bookings_router
@@ -10,15 +11,21 @@ from .api.endpoints.health import router as health_router
 from .core.config import settings
 from .db.base import init_db
 
-# Initialize Database Tables
-print(f"DATABASE_URL being used: {settings.DATABASE_URL}")
-init_db()
-print("init_db done")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize DB on first real request, not at import time
+    try:
+        print(f"DATABASE_URL being used: {settings.DATABASE_URL}")
+        init_db()
+        print("init_db done")
+    except Exception as e:
+        print(f"WARNING: init_db failed: {e}")
+    yield
 
-app = FastAPI(title=settings.APP_NAME)
+app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
 # Enable Resilient CORS for Next.js app
-origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",")]
+origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
