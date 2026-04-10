@@ -69,30 +69,30 @@ export default function Navbar() {
       }`}>
         <div className={`w-full flex justify-center border-b transition-all duration-500 ${
           scrolled 
-            ? "bg-black/40 border-white/5 backdrop-blur-md h-8" 
-            : "bg-transparent border-transparent h-8"
+            ? "bg-black/60 border-white/5 backdrop-blur-md h-7" 
+            : "bg-transparent border-transparent h-7"
         }`}>
-          <div className="w-full max-w-[1400px] flex justify-between items-center px-6 md:px-12 text-[9px] tracking-[0.15em] uppercase text-white/30 font-medium">
-            <div className="hidden md:flex items-center gap-4">
-              <span className="flex items-center gap-1.5 text-white/25">
+          <div className="w-full max-w-[1400px] flex justify-between items-center px-4 md:px-12 text-[10px] tracking-wider text-white/40 font-medium">
+            <div className="hidden lg:flex items-center gap-6">
+              <span className="flex items-center gap-1.5 text-white/30">
                 <MapPinIcon />
                 Senga, Gweru
               </span>
               <span className="text-white/10">|</span>
-              <span className="text-white/25">Mon-Sun: 7am-7pm</span>
+              <span className="text-white/30">Mon-Sun: 7am-7pm</span>
             </div>
-            <div className="flex items-center gap-3 ml-auto md:ml-0">
-              <a href="https://wa.me/263773772047" target="_blank" className="flex items-center gap-1.5 text-green-500/60 hover:text-green-400 transition-colors duration-300">
+            <div className="flex items-center gap-4 ml-auto md:ml-0">
+              <a href="https://wa.me/263773772047" target="_blank" className="flex items-center gap-1.5 text-green-500/50 hover:text-green-400 transition-colors duration-300">
                 <WhatsAppIcon />
                 <span className="hidden sm:inline">WhatsApp</span>
               </a>
               <span className="text-white/10">|</span>
-              <a href="tel:+263773772047" className="flex items-center gap-1.5 text-white/30 hover:text-white/60 transition-colors duration-300">
+              <a href="tel:+263773772047" className="flex items-center gap-1.5 hover:text-white/60 transition-colors duration-300">
                 <PhoneIcon />
                 <span className="hidden sm:inline">+263 773 772 047</span>
               </a>
-              <span className="text-white/10">|</span>
-              <a href="https://instagram.com/sukaravtech" target="_blank" className="flex items-center gap-1.5 text-white/30 hover:text-pink-400/70 transition-colors duration-300">
+              <span className="text-white/10 hidden sm:inline">|</span>
+              <a href="https://instagram.com/sukaravtech" target="_blank" className="flex items-center gap-1.5 hover:text-pink-400/70 transition-colors duration-300">
                 <InstagramIcon />
               </a>
             </div>
@@ -113,7 +113,7 @@ export default function Navbar() {
               </span>
               <span className="relative">
                 GANGSTER<span className="text-red-600">.</span>
-                <span className="absolute -bottom-1 left-0 w-0 h-[2px] bg-red-600 group-hover:w-full transition-all duration-500"></span>
+                <span className="absolute -bottom-1 left-0 w-0 h-[2px] bg-red-600 group-hover:w-full transition-all duration-300 var(--ease-premium)"></span>
               </span>
             </Link>
 
@@ -127,10 +127,10 @@ export default function Navbar() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="relative px-5 py-2 text-[11px] font-semibold tracking-[0.15em] uppercase text-white/50 hover:text-white transition-colors duration-300 group"
+                  className="relative px-5 py-2 text-[12px] font-medium tracking-wide text-white/60 hover:text-white transition-colors duration-[var(--speed-fast)] var(--ease-premium) group"
                 >
                   {item.label}
-                  <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-0 h-[2px] bg-red-600 rounded-full group-hover:w-3/4 transition-all duration-500 ease-out"></span>
+                  <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-0 h-[2px] bg-red-600 rounded-full group-hover:w-3/4 transition-all duration-[var(--speed-mid)] var(--ease-premium)"></span>
                 </Link>
               ))}
               
@@ -139,12 +139,12 @@ export default function Navbar() {
               <div className="flex items-center gap-3">
                 <Show when="signed-out">
                   <SignInButton mode="modal" forceRedirectUrl="/book">
-                    <button className="px-8 py-2.5 text-[11px] font-semibold tracking-[0.15em] uppercase text-white/50 hover:text-white transition-colors duration-300">
+                    <button className="px-6 py-2 text-[12px] font-medium tracking-wide text-white/60 hover:text-white transition-colors duration-300">
                       Sign In
                     </button>
                   </SignInButton>
                   <SignInButton mode="modal" forceRedirectUrl="/book">
-                    <button className="btn-booking ml-4">
+                    <button className="btn-booking-nav ml-2">
                       Book Now
                     </button>
                   </SignInButton>
@@ -154,7 +154,7 @@ export default function Navbar() {
                   <div className="flex items-center gap-4">
                     <UserButton />
                     <SignOutButton>
-                      <button className="btn-booking">
+                      <button className="btn-booking-nav">
                         Sign Out
                       </button>
                     </SignOutButton>

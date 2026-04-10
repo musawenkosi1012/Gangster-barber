@@ -1,0 +1,1 @@
+{"success": false, "redirect_url": null, "poll_url": null, "instructions": null, "error": "The integration ID is in test mode, so if authemail is specified then it must match the merchants registered email address (g************************r@g****.com)", "payment_method": "mobile"}

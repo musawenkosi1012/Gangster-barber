@@ -15,7 +15,7 @@ async def notify_backend_of_payment(booking_id: str, status: str):
     """
     Internal bridge to sync payment status with the main core backend (Port 8000).
     """
-    backend_url = os.getenv("BACKEND_API_URL", "http://localhost:8000")
+    backend_url = os.getenv("BACKEND_API_URL", "http://localhost:8005")
     try:
         async with httpx.AsyncClient() as client:
             # reference field in Paynow is our Booking ID

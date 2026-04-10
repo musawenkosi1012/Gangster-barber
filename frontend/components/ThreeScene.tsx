@@ -189,7 +189,7 @@ export default function ThreeScene() {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
     renderer.shadowMap.enabled = !isMobile;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
 
     // --- High-Fidelity Lighting ---
     const ambientLight = new THREE.AmbientLight(0xffffff, isMobile ? 2.5 : 0.4); 

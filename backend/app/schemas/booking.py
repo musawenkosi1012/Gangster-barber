@@ -7,17 +7,20 @@ class BookingBase(BaseModel):
     service: str
     user_id: str
     booking_date: Optional[date] = None
+    notes: Optional[str] = None
 
 class BookingCreate(BookingBase):
     slot_time: Optional[str] = None
+    payment_method: Optional[str] = "CASH" # CASH, ECO_CASH, ONE_MONEY, INN_BUCKS
+    payment_amount: Optional[float] = 0.0
 
 class BookingUpdate(BaseModel):
-    # All fields optional for PATCH
     name: Optional[str] = None
     service: Optional[str] = None
     slot_time: Optional[str] = None
     booking_date: Optional[date] = None
     status: Optional[str] = None
+    notes: Optional[str] = None
 
 class Booking(BookingBase):
     id: int

@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from ...schemas.booking import BookingCreate, Booking as BookingSchema, BookingUpdate
 from ...services.scheduler import scheduler
 from ...db.base import get_db
-from ...models import Booking
+from ...models import Booking, PaymentTransaction, AuditLog
 from datetime import date, datetime
 from typing import List, Optional, Annotated
 
@@ -53,11 +54,34 @@ def create_booking(req: BookingCreate, db: db_dependency):
         service=req.service,
         user_id=req.user_id,
         slot_time=slot,
-        booking_date=booking_date
+        booking_date=booking_date,
+        status="PENDING" if req.payment_method != "CASH" else "CONFIRMED"
     )
     
     try:
         db.add(new_booking)
+        db.flush() # Get the ID before commit
+        
+        # 1. Initialize Payment Ledger Entry if not cash
+        if req.payment_method != "CASH":
+            transaction = PaymentTransaction(
+                booking_id=new_booking.id,
+                amount=req.payment_amount or 0.0,
+                provider=req.payment_method,
+                status="pending"
+            )
+            db.add(transaction)
+            
+        # 2. Record in Audit Log
+        audit = AuditLog(
+            actor_id=req.user_id,
+            role="customer",
+            action="CREATE_BOOKING",
+            resource_id=str(new_booking.id),
+            metadata_json={"service": req.service, "date": str(booking_date), "slot": slot}
+        )
+        db.add(audit)
+
         db.commit()
         db.refresh(new_booking)
         return new_booking
@@ -114,25 +138,55 @@ def delete_booking(booking_id: int, db: db_dependency):
     return {"message": "Booking cancelled successfully"}
 
 @router.get("/slots")
-def get_available_slots(db: db_dependency, booking_date: Optional[date] = None):
-    return scheduler.get_all_slots(db, booking_date)
+def get_available_slots(db: db_dependency, date: Optional[date] = None):
+    return scheduler.get_all_slots(db, date)
 
 @router.get("/", response_model=List[BookingSchema])
 def list_bookings(db: db_dependency, booking_date: Optional[date] = None):
-    # Hide past bookings by default?
-    result = db.execute(text("SELECT id, name, service, slot_time, booking_date, status, created_at FROM bookings ORDER BY booking_date DESC"))
-    bookings = []
-    for row in result:
-        bookings.append({
-            "id": row[0],
-            "name": row[1],
-            "service": row[2],
-            "slot_time": row[3],
-            "booking_date": row[4],
-            "status": row[5],
-            "created_at": row[6]
-        })
-    return bookings
+    query = db.query(Booking)
+    if booking_date:
+        query = query.filter(Booking.booking_date == booking_date)
+    return query.order_by(Booking.booking_date.desc()).all()
+
+class PaymentVerification(BaseModel):
+    booking_id: int
+    provider_ref: str
+
+@router.post("/verify-payment")
+def submit_payment_reference(req: PaymentVerification, db: db_dependency):
+    """
+    Allows the customer to submit an EcoCash/OneMoney reference code.
+    Flags the transaction for manual review in the IT Command Center.
+    """
+    transaction = db.query(PaymentTransaction).filter(
+        PaymentTransaction.booking_id == req.booking_id,
+        PaymentTransaction.status == "pending"
+    ).first()
+    
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Pending transaction not found for this booking")
+    
+    # Move to manual_review for IT/Admin verification
+    transaction.provider_ref = req.provider_ref
+    transaction.status = "manual_review"
+    
+    # Update booking status
+    booking = db.query(Booking).filter(Booking.id == req.booking_id).first()
+    if booking:
+        booking.status = "VERIFYING"
+    
+    # Log the verification attempt
+    audit = AuditLog(
+        actor_id=booking.user_id if booking else "unknown",
+        role="customer",
+        action="SUBMIT_PAYMENT_REF",
+        resource_id=str(req.booking_id),
+        metadata_json={"ref": req.provider_ref}
+    )
+    db.add(audit)
+    
+    db.commit()
+    return {"message": "Reference submitted. Verification in progress."}
 
 @router.get("/user/{user_id}", response_model=List[BookingSchema])
 def get_user_bookings(user_id: str, db: db_dependency):

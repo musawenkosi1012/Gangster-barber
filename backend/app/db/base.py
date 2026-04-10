@@ -6,7 +6,10 @@ from ..core.config import settings
 
 # 1. Create the database engine
 # We use NullPool for compatibility with Supabase's transaction mode/pooling
-engine = create_engine(settings.DATABASE_URL)
+engine = create_engine(
+    settings.DATABASE_URL, 
+    poolclass=NullPool
+)
 
 # 2. Create the Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

@@ -1,3 +1,7 @@
+import React from "react";
+import Link from "next/link";
+import { BRAND } from "@/utils/constants";
+
 export default function Footer() {
   return (
     <footer className="bg-[#050505] pt-24 pb-10 px-6 md:px-10 text-[#555] text-[10px] font-bold leading-loose uppercase tracking-[0.3em] border-t border-white/5 relative z-10">
@@ -49,10 +53,14 @@ export default function Footer() {
             <a href="mailto:sukanovtech@gmail.com" className="text-red-600/60 hover:text-red-500 transition underline underline-offset-2">sukanovtech@gmail.com</a>
           </span>
           <div className="flex flex-wrap items-center gap-4 text-white/25">
-            <a href="tel:+263773772047" className="hover:text-red-600 transition">+263 773 772 047</a>
-            <span className="text-white/10">|</span>
-            <a href="https://wa.me/263773772047" target="_blank" className="hover:text-red-600 transition">WhatsApp</a>
-            <span className="text-white/10">|</span>
+            <div>
+              <p className="mb-2 text-white italic">WhatsApp/Call</p>
+              <p>{BRAND.contact.phone}</p>
+            </div>
+            <div>
+              <p className="mb-2 text-white italic">Email Dispatch</p>
+              <p className="normal-case tracking-normal">{BRAND.contact.email}</p>
+            </div>
             <a href="https://instagram.com/sukaravtech" target="_blank" className="hover:text-red-600 transition">@sukaravtech</a>
           </div>
         </div>

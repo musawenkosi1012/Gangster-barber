@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     DB_HOST: str = os.getenv("host", "localhost")
     DB_PORT: str = os.getenv("port", "5432")
     DB_NAME: str = os.getenv("dbname", "postgres")
+    APP_PORT: int = int(os.getenv("APP_PORT", "8005"))
+    
+    # Clerk Auth
+    CLERK_SECRET_KEY: str = os.getenv("CLERK_SECRET_KEY", "sk_test_IvQdOmFD7fqhoD7ual7B3KAVt8lKc9FUkTmSIikc6R")
+    CLERK_JWT_ISSUER: str = os.getenv("CLERK_JWT_ISSUER", "https://adapted-tahr-3.clerk.accounts.dev")
+    
     
     @property
     def DATABASE_URL(self) -> str:

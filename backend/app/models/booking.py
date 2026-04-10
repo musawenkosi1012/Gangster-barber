@@ -13,6 +13,7 @@ class Booking(Base):
     service = Column(String, nullable=False)
     user_id = Column(String, nullable=False)
     slot_time = Column(String, nullable=False)
-    status = Column(String, default="PENDING")
+    status = Column(String, default="PENDING") # PENDING, CONFIRMED, COMPLETED, NO-SHOW, CANCELLED
+    notes = Column(String, nullable=True) # For Barber internal notes
     booking_date = Column(Date, server_default=func.current_date())
     created_at = Column(DateTime(timezone=True), server_default=func.now())

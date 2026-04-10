@@ -1,7 +1,7 @@
 from datetime import datetime, time, timedelta, date
 from typing import List, Optional, Dict
 from sqlalchemy.orm import Session
-from ..models import Booking
+from ..models import Booking, BlockedSlot
 
 try:
     from zoneinfo import ZoneInfo
@@ -13,37 +13,44 @@ else:
 
 class SchedulerService:
     def __init__(self):
-        # Configuration
-        self.START_TIME = time(7, 0)
-        self.END_TIME = time(20, 0)
+        # Configuration - Now set for High-Performance Continuous Stream
+        self.START_TIME = time(5, 0)
+        self.END_TIME = time(22, 0)
         self.SESSION_DURATION = timedelta(minutes=40)
         
-        # Professional Break Schedule
-        self.BREAK_SCHEDULE = [
-            (time(10, 0), time(10, 30)), # Morning Break
-            (time(13, 0), time(14, 0)),  # Lunch Break
-        ]
+        # Static Break logic removed in favor of Dynamic Admin Blocking
+        self.BREAK_SCHEDULE = []
 
     def get_zimbabwe_now(self) -> datetime:
         """Returns the current time in Zimbabwe (Gweru)."""
         return datetime.now(ZIMBABWE_TZ)
 
     def get_booked_times(self, db: Session, target_date: date) -> List[time]:
-        """Returns a list of already booked times for a specific date using ORM."""
+        """Returns a list of already booked or manually blocked times for a specific date."""
         bookings = db.query(Booking).filter(Booking.booking_date == target_date).all()
+        blocks = db.query(BlockedSlot).filter(BlockedSlot.date == target_date).all()
+        
         booked_times = []
+        # Parse active bookings
         for b in bookings:
             try:
-                # Try standard format first
                 t = datetime.strptime(b.slot_time, "%H:%M").time()
                 booked_times.append(t)
             except ValueError:
                 try:
-                    # Try format with AM/PM if that's what's in the DB
                     t = datetime.strptime(b.slot_time.strip(), "%I:%M %p").time()
                     booked_times.append(t)
                 except ValueError:
                     print(f"Warning: Could not parse slot_time '{b.slot_time}'")
+        
+        # Parse manual blocks
+        for block in blocks:
+             try:
+                t = datetime.strptime(block.slot_time, "%H:%M").time()
+                booked_times.append(t)
+             except ValueError:
+                print(f"Warning: Could not parse block time '{block.slot_time}'")
+                
         return booked_times
 
     def allocate_next_available(self, db: Session) -> Optional[Dict[str, any]]:
@@ -67,9 +74,16 @@ class SchedulerService:
         return None
 
     def get_all_slots(self, db: Session, target_date: Optional[date] = None) -> List[dict]:
-        """Generates all slots for a date and marks availability."""
+        """Generates all slots for a date and marks availability with metadata."""
         target_date = target_date or self.get_zimbabwe_now().date()
-        booked_times = [t.strftime("%H:%M") for t in self.get_booked_times(db, target_date)]
+        
+        # Fetch status pointers
+        bookings = db.query(Booking).filter(Booking.booking_date == target_date).all()
+        blocks = db.query(BlockedSlot).filter(BlockedSlot.date == target_date).all()
+        
+        # Map for O(1) lookups during generation
+        booking_times = {b.slot_time for b in bookings}
+        block_map = {bl.slot_time: bl for bl in blocks}
         
         current_time = datetime.combine(target_date, self.START_TIME)
         limit_time = datetime.combine(target_date, self.END_TIME)
@@ -78,7 +92,9 @@ class SchedulerService:
         while current_time + self.SESSION_DURATION <= limit_time:
             slot_start = current_time.time()
             slot_end = (current_time + self.SESSION_DURATION).time()
-            
+            start_str = slot_start.strftime("%H:%M")
+
+            # Check Professional Break Schedule
             in_break = False
             for b_start, b_end in self.BREAK_SCHEDULE:
                 if (slot_start < b_end and slot_end > b_start):
@@ -86,13 +102,17 @@ class SchedulerService:
                     in_break = True
                     break
             
-            if in_break:
-                continue
+            if in_break: continue
                 
-            start_str = slot_start.strftime("%H:%M")
+            is_booked = start_str in booking_times
+            block_obj = block_map.get(start_str)
+            
             slots.append({
                 "time": start_str,
-                "available": start_str not in booked_times
+                "available": not (is_booked or block_obj),
+                "is_blocked": bool(block_obj),
+                "block_id": block_obj.id if block_obj else None,
+                "block_reason": block_obj.reason if block_obj else None
             })
             current_time += self.SESSION_DURATION
             
