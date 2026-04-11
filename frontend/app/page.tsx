@@ -58,6 +58,17 @@ export default function Home() {
       <section id="hero" className="h-[120vh] md:h-[250vh]">
         <div className="sticky top-0 h-[100dvh] md:h-screen flex flex-col items-center justify-center px-4 overflow-visible">
           <div className="text-center relative z-10 w-full">
+            {/* Brand logo above hero headline */}
+            <div className="reveal flex justify-center mb-6 active">
+              <Image
+                src="/logo.png"
+                alt="Gangster Barber"
+                width={96}
+                height={96}
+                className="rounded-2xl shadow-[0_0_40px_rgba(220,38,38,0.25)] border border-white/10"
+                priority
+              />
+            </div>
             <p className="reveal text-sm md:text-lg text-gray-400 font-medium tracking-widest uppercase mb-4 active">
               Welcome to the
             </p>
