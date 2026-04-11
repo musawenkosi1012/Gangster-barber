@@ -13,11 +13,13 @@ export async function syndicateFetch(
   options: RequestInit = {},
   retries = 2
 ): Promise<Response> {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+  // Always use relative paths — Next.js rewrites in next.config.ts proxy
+  // /api/* → FastAPI backend and /api/payments/* → PayNow microservice.
+  // Absolute http/https URLs are passed through as-is (e.g. Paynow poll_url checks).
   const pathSeparator = endpoint.startsWith("/") ? "" : "/";
   const url = endpoint.startsWith("http")
     ? endpoint
-    : `${apiUrl}${pathSeparator}${endpoint}`;
+    : `${pathSeparator}${endpoint}`;
 
   let lastError: any;
 

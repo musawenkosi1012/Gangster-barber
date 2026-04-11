@@ -362,7 +362,7 @@ export default function BookPage() {
         : BOOKING_DEPOSIT;
 
       // ─── STEP 1: Initiate payment FIRST ─────────────────────────────
-      const paynowUrl = process.env.NEXT_PUBLIC_PAYNOW_URL || "";
+      // Use relative path — Next.js rewrite proxies /api/payments/* to PayNow service
       const method = paymentMethod.replace("paynow_", "");
       // Generate a unique reference for Paynow BEFORE the booking exists — avoids Appointment #0
       const paynowRef = typeof crypto !== 'undefined' && crypto.randomUUID
@@ -370,7 +370,7 @@ export default function BookPage() {
         : `ref-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const payPayload = buildPaymentPayload(method, paynowRef, { ...formData, service: finalService }, user, phoneNumber, payAmount);
 
-      const payRes = await fetch(`${paynowUrl}/api/payments/initiate`, {
+      const payRes = await fetch(`/api/payments/initiate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payPayload),
