@@ -16,7 +16,7 @@ def list_customers(
     search: Optional[str] = None,
     sort_by: str = "last_visit_at", # last_visit_at, total_spend
     db: Session = Depends(get_db),
-    current_admin: Dict[str, Any] = Depends(require_role(["barber_admin", "owner", "admin"]))
+    current_admin: Dict[str, Any] = Depends(require_role(["admin", "barber", "barber_admin", "owner"]))
 ):
     """The CRM Search Engine: Returns high-performance filterable customer list with behavioral insights."""
     query = db.query(CustomerModel)
@@ -37,7 +37,7 @@ def list_customers(
 def get_customer_detail(
     customer_id: int, 
     db: Session = Depends(get_db),
-    current_admin: Dict[str, Any] = Depends(require_role(["barber_admin", "owner", "admin"]))
+    current_admin: Dict[str, Any] = Depends(require_role(["admin", "barber", "barber_admin", "owner"]))
 ):
     """360-Degree Profile: Aggregates historical metrics, LTV, and reliability scores for a single explorer."""
     customer = db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
@@ -88,7 +88,7 @@ def patch_customer_intelligence(
     customer_id: int,
     data: CustomerUpdate,
     db: Session = Depends(get_db),
-    current_admin: Dict[str, Any] = Depends(require_role(["barber_admin", "owner", "admin"]))
+    current_admin: Dict[str, Any] = Depends(require_role(["admin", "barber", "barber_admin", "owner"]))
 ):
     """Intelligence Update: Modifies behavior notes, status (VIP/Blocked), and tactical tags."""
     customer = db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()

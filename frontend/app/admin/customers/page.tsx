@@ -37,7 +37,7 @@ export default function CustomersPage() {
   const fetchList = async () => {
     try {
       const token = await getToken();
-      const response = await syndicateFetch(`/api/v1/admin/customers?search=${search}`, {
+      const response = await syndicateFetch(`/api/v1/admin/customers/?search=${search}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (response.ok) {
@@ -55,7 +55,7 @@ export default function CustomersPage() {
     setIsDetailLoading(true);
     try {
       const token = await getToken();
-      const response = await syndicateFetch(`/api/v1/admin/customers/${id}`, {
+      const response = await syndicateFetch(`/api/v1/admin/customers/${id}/`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (response.ok) {
