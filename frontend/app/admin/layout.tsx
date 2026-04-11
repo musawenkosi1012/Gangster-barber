@@ -14,9 +14,8 @@ export default async function AdminLayout({
   const role = sessionClaims?.metadata?.role || "customer";
 
   const navItems = [
-    { label: "Dashboard", href: "/admin" },
+    { label: "Schedule", href: "/admin" },
     { label: "Ledger", href: "/admin/ledger" },
-    { label: "Schedule", href: "/admin/schedule" },
     { label: "Services", href: "/admin/services" },
     { label: "Customers", href: "/admin/customers" },
   ];
