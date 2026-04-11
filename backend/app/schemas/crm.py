@@ -13,16 +13,22 @@ class CustomerBase(BaseModel):
 class CustomerCreate(CustomerBase):
     clerk_id: Optional[str] = None
 
-class CustomerUpdate(CustomerBase):
-    pass
+class CustomerUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[str] = None
 
 class Customer(CustomerBase):
     id: int
-    total_spend: int
-    booking_count: int
-    no_show_count: int
+    clerk_id: Optional[str] = None
+    total_spend: Optional[int] = None
+    booking_count: Optional[int] = None
+    no_show_count: Optional[int] = None
     last_visit_at: Optional[datetime] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 class CustomerDetail(Customer):

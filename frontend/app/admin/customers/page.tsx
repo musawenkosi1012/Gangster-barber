@@ -7,18 +7,20 @@ import { syndicateFetch } from "@/utils/api";
 interface Customer {
   id: number;
   full_name: string;
+  email: string | null;
   phone: string | null;
+  clerk_id: string | null;
   status: string;
-  total_spend: number;
-  booking_count: number;
-  no_show_count: number;
+  total_spend: number | null;
+  booking_count: number | null;
+  no_show_count: number | null;
   last_visit_at: string | null;
+  created_at: string | null;
 }
 
 interface CustomerDetail extends Customer {
   reliability_pct: number;
   history: Array<{ date: string; slot: string; status: string; service: string }>;
-  email: string | null;
   notes: string | null;
   tags: string | null;
   favorite_service: string | null;
@@ -93,7 +95,7 @@ export default function CustomersPage() {
           {isListLoading ? (
             [...Array(6)].map((_, i) => <div key={i} className="h-20 bg-white/5 rounded-2xl animate-pulse" />)
           ) : customers.length === 0 ? (
-             <div className="text-center py-20 opacity-20 text-[10px] font-black uppercase tracking-widest">No Identities Found</div>
+             <div className="text-center py-20 opacity-20 text-[10px] font-black uppercase tracking-widest">No customers found</div>
           ) : (
             customers.map((c) => (
               <button 
@@ -155,12 +157,12 @@ export default function CustomersPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16">
                <div className="bg-white/5 border border-white/5 rounded-[2.5rem] p-8">
                   <p className="text-[8px] font-black uppercase tracking-[0.4em] text-white/20 mb-4">Total LTV</p>
-                  <p className="text-3xl font-black text-white">${detail.total_spend}</p>
-                  <p className="text-[8px] font-bold text-white/10 uppercase tracking-widest mt-2">{detail.booking_count} Lifetime Sessions</p>
+                  <p className="text-3xl font-black text-white">${detail.total_spend ?? 0}</p>
+                  <p className="text-[8px] font-bold text-white/10 uppercase tracking-widest mt-2">{detail.booking_count ?? 0} Lifetime Sessions</p>
                </div>
                <div className="bg-white/5 border border-white/5 rounded-[2.5rem] p-8">
                   <p className="text-[8px] font-black uppercase tracking-[0.4em] text-white/20 mb-4">Risk Profile</p>
-                  <p className={`text-3xl font-black ${detail.no_show_count > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{detail.no_show_count} No-Shows</p>
+                  <p className={`text-3xl font-black ${(detail.no_show_count ?? 0) > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{detail.no_show_count ?? 0} No-Shows</p>
                   <p className="text-[8px] font-bold text-white/10 uppercase tracking-widest mt-2">Historical Integrity</p>
                </div>
                <div className="bg-white/5 border border-white/5 rounded-[2.5rem] p-8">

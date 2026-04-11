@@ -44,20 +44,24 @@ def get_customer_detail(
     if not customer:
         raise HTTPException(status_code=404, detail="Customer Profile not found.")
 
-    # Forensic Match: We link bookings via Clerk ID or Name/Phone
-    history_query = db.query(BookingModel).order_by(BookingModel.booking_date.desc())
+    # Forensic Match: We link bookings via Clerk ID or Name
+    history = []
     if customer.clerk_id:
-        history_query = history_query.filter(BookingModel.user_id == customer.clerk_id)
-    else:
-        history_query = history_query.filter(BookingModel.phone == customer.phone) # Assuming phone index exists on bookings soon
-
-    history = history_query.all()
+        history = db.query(BookingModel).filter(
+            BookingModel.user_id == customer.clerk_id
+        ).order_by(BookingModel.booking_date.desc()).all()
+    elif customer.full_name:
+        history = db.query(BookingModel).filter(
+            BookingModel.name == customer.full_name
+        ).order_by(BookingModel.booking_date.desc()).all()
 
     # Intelligence: Reliability Math
     reliability = 100.0
-    if customer.booking_count > 0:
-        successful = customer.booking_count - customer.no_show_count
-        reliability = (successful / customer.booking_count) * 100
+    booking_count = customer.booking_count or 0
+    no_show_count = customer.no_show_count or 0
+    if booking_count > 0:
+        successful = booking_count - no_show_count
+        reliability = (successful / booking_count) * 100
 
     # Analytics: Historical Resonance
     services_count = {}
@@ -70,6 +74,7 @@ def get_customer_detail(
         "full_name": customer.full_name,
         "phone": customer.phone,
         "email": customer.email,
+        "clerk_id": customer.clerk_id,
         "status": customer.status,
         "notes": customer.notes,
         "tags": customer.tags,
