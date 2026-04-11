@@ -33,11 +33,12 @@ const PAYMENT_LABELS: Record<string, string> = {
   paynow_onemoney: "OneMoney",
   paynow_innbucks: "InnBucks",
   paynow_omari: "O'Mari",
-  paynow_vmc: "Card",
-  paynow_zimswitch: "Zimswitch",
   paynow_web: "Web Pay",
   cash: "Cash"
 };
+
+// VMC (Visa/Mastercard) and ZimSwitch require real card tokenisation — not yet supported.
+// These methods are disabled until a card tokenisation flow is implemented.
 
 const parseSlotToDate = (dateStr: string, slotStr: string): Date => {
   const match = /(\d+):(\d+)\s*(AM|PM)?/i.exec(slotStr);
@@ -80,10 +81,10 @@ const calculateTimeDifference = (targetDate: Date): string => {
   return `${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
 };
 
-const buildPaymentPayload = (method: string, bookingId: number, formData: any, user: any, phoneNumber: string, amount: number) => {
+const buildPaymentPayload = (method: string, paynowRef: string, formData: any, user: any, phoneNumber: string, amount: number) => {
   const email = user?.primaryEmailAddress?.emailAddress || "guest@gangster.com";
   const payload: any = {
-    booking_id: bookingId,
+    booking_id: paynowRef,  // Use UUID reference instead of 0 — booking doesn't exist yet
     customer_name: formData.name,
     customer_email: email,
     service: formData.service,
@@ -94,9 +95,7 @@ const buildPaymentPayload = (method: string, bookingId: number, formData: any, u
   if (method === "mobile" || method === "onemoney" || method === "innbucks" || method === "omari") {
     payload.phone_number = phoneNumber;
   }
-  
-  if (method === "vmc") payload.token = "{11111111-1111-1111-1111-111111111111}";
-  if (method === "zimswitch") payload.token = "11111111111111111111111111111111";
+  // VMC and ZimSwitch require real card tokenisation — disabled until implemented
 
   return payload;
 };
@@ -123,28 +122,6 @@ const handlePaynowAction = (payData: any): boolean => {
 
   alert(message);
   return false;
-};
-
-const processPayment = async (paymentMethod: string, user: any, formData: any, bookingId: number, phoneNumber: string, amount: number): Promise<boolean> => {
-  const paynowUrl = process.env.NEXT_PUBLIC_PAYNOW_URL || "";
-  const method = paymentMethod.replace("paynow_", "");
-  const payload = buildPaymentPayload(method, bookingId, formData, user, phoneNumber, amount);
-
-  try {
-    const response = await syndicateFetch(`${paynowUrl}/api/payments/initiate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) return false;
-    
-    const payData = await response.json();
-    return handlePaynowAction(payData);
-  } catch (err) {
-    console.error("Payment sync failed:", err);
-    return false;
-  }
 };
 
 const checkActiveBookingUser = async (user: any, setSelectedDate: any, setAllocatedSlot: any, setBookingStatus: any) => {
@@ -316,7 +293,7 @@ export default function BookPage() {
   const [bookingMode, setBookingMode] = useState<"automatic" | "custom">("automatic");
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [paymentMethod, setPaymentMethod] = useState<"paynow_mobile" | "paynow_onemoney" | "paynow_innbucks" | "paynow_omari" | "paynow_vmc" | "paynow_zimswitch">("paynow_mobile");
+  const [paymentMethod, setPaymentMethod] = useState<"paynow_mobile" | "paynow_onemoney" | "paynow_innbucks" | "paynow_omari">("paynow_mobile");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [timeLeft, setTimeLeft] = useState<string>("");
   const [isSlotsLoading, setIsSlotsLoading] = useState(false);
@@ -387,7 +364,11 @@ export default function BookPage() {
       // ─── STEP 1: Initiate payment FIRST ─────────────────────────────
       const paynowUrl = process.env.NEXT_PUBLIC_PAYNOW_URL || "";
       const method = paymentMethod.replace("paynow_", "");
-      const payPayload = buildPaymentPayload(method, 0, { ...formData, service: finalService }, user, phoneNumber, payAmount);
+      // Generate a unique reference for Paynow BEFORE the booking exists — avoids Appointment #0
+      const paynowRef = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `ref-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const payPayload = buildPaymentPayload(method, paynowRef, { ...formData, service: finalService }, user, phoneNumber, payAmount);
 
       const payRes = await fetch(`${paynowUrl}/api/payments/initiate`, {
         method: "POST",
@@ -644,11 +625,12 @@ export default function BookPage() {
                         </div>
                       )}
 
-                      <div className="grid grid-cols-2 sm:grid-cols-3 p-1 bg-white/5 border border-white/5 rounded-2xl gap-1">
-                        {["paynow_mobile", "paynow_onemoney", "paynow_innbucks", "paynow_omari", "paynow_vmc", "paynow_zimswitch"].map(m => (
+                      <div className="grid grid-cols-2 sm:grid-cols-2 p-1 bg-white/5 border border-white/5 rounded-2xl gap-1">
+                        {["paynow_mobile", "paynow_onemoney", "paynow_innbucks", "paynow_omari"].map(m => (
                           <button key={m} type="button" onClick={()=>setPaymentMethod(m as any)} className={getPaymentButtonStyle(m, paymentMethod)}>{PAYMENT_LABELS[m]}</button>
                         ))}
                       </div>
+                      <p className="text-[8px] font-medium text-center text-white/20 uppercase tracking-widest">Card (VMC) and ZimSwitch coming soon</p>
                       
                       <div className="space-y-3">
                          {["paynow_mobile", "paynow_onemoney", "paynow_innbucks", "paynow_omari"].includes(paymentMethod) && (

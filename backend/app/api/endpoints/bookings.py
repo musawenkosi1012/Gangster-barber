@@ -209,8 +209,39 @@ def get_payment_status(booking_id: int, db: db_dependency):
 
     return {
         "booking_id": booking_id,
-        "booking_status": booking.status,  # PENDING, CONFIRMED, CANCELLED
+        "booking_status": booking.status,
         "payment_status": transaction.status if transaction else "none",
         "poll_url": transaction.poll_url if transaction else None,
-        "paid": booking.status in ["CONFIRMED", "PAID"],
+        # Only CONFIRMED is a valid paid state now (PAID was invalid status)
+        "paid": booking.status == "CONFIRMED",
+    }
+
+
+class CompletePaymentRequest(BaseModel):
+    transaction_status: str = "completed"
+
+
+@router.patch("/{booking_id}/complete-payment")
+def complete_payment_transaction(booking_id: int, req: CompletePaymentRequest, db: db_dependency):
+    """
+    Fix 3: Called by the PayNow webhook (via notify_backend_of_payment) to mark
+    the PaymentTransaction record as completed. Previously, the ledger stayed
+    at 'pending' forever even after a successful payment.
+    """
+    transaction = db.query(PaymentTransaction).filter(
+        PaymentTransaction.booking_id == booking_id
+    ).order_by(PaymentTransaction.id.desc()).first()
+
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Payment transaction not found for this booking")
+
+    transaction.status = req.transaction_status
+    db.commit()
+    db.refresh(transaction)
+
+    return {
+        "message": f"Transaction {transaction.id} marked as {req.transaction_status}",
+        "transaction_id": transaction.id,
+        "booking_id": booking_id,
+        "status": transaction.status
     }

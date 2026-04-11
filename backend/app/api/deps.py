@@ -2,6 +2,7 @@ from fastapi import HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 import httpx
+import os
 from ..core.config import settings
 from typing import Dict, Any, Optional
 import time
@@ -81,16 +82,30 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_sc
              )
 
         # 2. Cryptographic Verification (RS256)
-        # We strictly validate the issuer and algorithm to prevent spoofing
+        # verify_aud is False because Clerk Frontend JWTs use 'azp' (authorized party)
+        # instead of 'aud' for browser-issued tokens. We validate 'azp' manually below.
         payload = jwt.decode(
             token.credentials,
             rsa_key,
             algorithms=["RS256"],
             issuer=settings.CLERK_JWT_ISSUER,
             options={
-                "verify_aud": False # Audit check skipped unless specific mobile client ID used
+                "verify_aud": False
             }
         )
+
+        # Fix 10: Validate 'azp' claim to prevent cross-service token abuse.
+        # CLERK_AUTHORIZED_PARTY should be set to your frontend origin, e.g.
+        # https://gangster-barber-frontend.vercel.app
+        authorized_party = os.getenv("CLERK_AUTHORIZED_PARTY", "")
+        if authorized_party:
+            token_azp = payload.get("azp", "")
+            if token_azp != authorized_party:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Identity verification failed: Token not issued for this application"
+                )
+
         return payload
         
     except JWTError as e:
