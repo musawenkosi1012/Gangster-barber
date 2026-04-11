@@ -10,7 +10,6 @@ from ...services.health import health_service
 from ..deps import get_current_admin
 from datetime import date
 from typing import List, Optional, Dict, Any
-import asyncio
 import time
 
 router = APIRouter(prefix="/api/v1/admin", dependencies=[Depends(get_current_admin)])
@@ -50,44 +49,46 @@ async def admin_dashboard_bootstrap(
     start_time = time.perf_counter()
     zims_now = scheduler.get_zimbabwe_now()
     today = zims_now.date()
-    
-    # --- 🛰️ Dispatch Layer (Concurrency) ---
-    # We run the Heartbeat (Network bound) in parallel with the BI processing (CPU/DB bound)
-    # Note: We must be careful with sharing the Session across threads, 
-    # but since these are all awaitable within the same loop, it works.
-    
-    heartbeat_task = asyncio.create_task(health_service.record_heartbeat(db))
-    
+
     # --- 1. BI & KPI CALCULATIONS (Synchronous Block) ---
     today_bookings = db.query(Booking).filter(Booking.booking_date == today).all()
     services = db.query(Service).all()
     price_map = {s.name: s.price for s in services}
-    
+
     paid_bookings = [b for b in today_bookings if b.status in ["COMPLETED", "CONFIRMED"]]
     total_rev = sum(price_map.get(b.service, 15.0) for b in paid_bookings)
-    
+
     finished_count = len([b for b in today_bookings if b.status in ["COMPLETED", "NO_SHOW"]])
     no_show_count = len([b for b in today_bookings if b.status == "NO_SHOW"])
     no_show_rate = (no_show_count / finished_count * 100) if finished_count > 0 else 0
-    
+
     total_slots = len(scheduler.get_all_slots(db, today))
     booked_slots = len(today_bookings)
     daily_load = (booked_slots / total_slots * 100) if total_slots > 0 else 0
-    
+
     now_time_str = zims_now.strftime("%H:%M")
     next_up = db.query(Booking).filter(
         Booking.booking_date == today,
         Booking.slot_time > now_time_str,
         Booking.status == "CONFIRMED"
     ).order_by(Booking.slot_time.asc()).first()
-    
+
     # --- 2. PAYMENT ALERTS ---
     pending_txs = db.query(PaymentTransaction).filter(
         PaymentTransaction.status == "manual_review"
     ).order_by(PaymentTransaction.created_at.asc()).all()
-    
-    # --- 🛰️ Await the Heartbeat ---
-    integrity = await heartbeat_task
+
+    # --- 3. HEALTH PROBES (direct await, no create_task for serverless safety) ---
+    try:
+        integrity = await health_service.record_heartbeat(db)
+    except Exception:
+        integrity = {
+            "database": "unknown", "database_latency_ms": None,
+            "auth": "unknown", "auth_latency_ms": None,
+            "payments": "no_data", "payments_failures": 0,
+            "payments_success_rate": None, "uptime": 100.0,
+            "uptime_has_data": False, "cluster": "GB-API-A"
+        }
     
     # Performance telemetry
     process_time = time.perf_counter() - start_time

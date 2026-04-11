@@ -7,7 +7,7 @@ from ..models import SystemHealthLog, PaymentTransaction
 
 class HealthService:
     def __init__(self):
-        self.CLERK_JWKS_URL = "https://clerk.gangsterbarber.com/.well-known/jwks.json" # Placeholder
+        self.CLERK_JWKS_URL = "https://adapted-tahr-3.clerk.accounts.dev/.well-known/jwks.json"
 
     def classify_status(self, latency_ms: int, failure_count: int = 0) -> str:
         """Categorizes system health based on tri-state logic."""
@@ -33,7 +33,7 @@ class HealthService:
             async with httpx.AsyncClient(timeout=2.0) as client:
                 # We check the JWKS endpoint as a heartbeat for the Auth cluster
                 # Note: In a real zim environment, we handle network flickering
-                resp = await client.get("https://clerk.com/.well-known/jwks.json")
+                resp = await client.get(self.CLERK_JWKS_URL)
                 latency = int((time.perf_counter() - start) * 1000)
                 status = self.classify_status(latency) if resp.status_code == 200 else "DOWN"
                 return {"status": status, "latency": latency}
@@ -68,27 +68,21 @@ class HealthService:
         return round(uptime, 2)
 
     async def record_heartbeat(self, db: Session):
-        """Executes full system probes in parallel to minimize latency."""
-        import asyncio
-        
-        # Dispatch all heartbeats simultaneously (The Parallel Pulse)
-        results = await asyncio.gather(
-            self.probe_database(db),
-            self.probe_auth(),
-            self.probe_gateway(db),
-            return_exceptions=True
-        )
-        
-        # Unpack with safety (isolation logic)
-        db_health = results[0] if not isinstance(results[0], Exception) else {"status": "DOWN", "latency": -1}
-        auth_health = results[1] if not isinstance(results[1], Exception) else {"status": "DOWN", "latency": -1}
-        gateway_health = results[2] if not isinstance(results[2], Exception) else {"status": "DOWN", "latency": -1}
+        """Executes system probes sequentially for DB-touching probes to avoid session conflicts."""
+        # probe_database and probe_gateway share the DB session — run sequentially
+        db_health = await self.probe_database(db)
+        gateway_health = await self.probe_gateway(db)
+        # probe_auth is purely network — safe to run last
+        auth_health = await self.probe_auth()
 
-        # Persist logs
-        db.add(SystemHealthLog(service="DATABASE", status=db_health["status"], latency_ms=db_health.get("latency", 0)))
-        db.add(SystemHealthLog(service="AUTH", status=auth_health["status"], latency_ms=auth_health.get("latency", 0)))
-        db.add(SystemHealthLog(service="GATEWAY", status=gateway_health["status"], latency_ms=gateway_health.get("latency", 0)))
-        db.commit()
+        # Persist logs — wrapped so a log write failure doesn't crash the dashboard
+        try:
+            db.add(SystemHealthLog(service="DATABASE", status=db_health["status"], latency_ms=db_health.get("latency", 0)))
+            db.add(SystemHealthLog(service="AUTH", status=auth_health["status"], latency_ms=auth_health.get("latency", 0)))
+            db.add(SystemHealthLog(service="GATEWAY", status=gateway_health["status"], latency_ms=gateway_health.get("latency", 0)))
+            db.commit()
+        except Exception:
+            db.rollback()
         
         uptime = self.calculate_uptime(db)
 
