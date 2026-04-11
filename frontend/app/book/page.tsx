@@ -393,7 +393,7 @@ export default function BookPage() {
       setPaymentPollUrl(pollUrl);
 
       // ─── STEP 2: Save booking as PENDING with poll_url ───────────────
-      const bookRes = await syndicateFetch("/api/book", {
+      const bookRes = await syndicateFetch("/api/book/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
