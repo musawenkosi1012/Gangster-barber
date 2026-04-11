@@ -302,6 +302,9 @@ export default function BookPage() {
   const [payForCut, setPayForCut] = useState(false);
   const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
   const [paymentPollUrl, setPaymentPollUrl] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (isLoaded && !user) router.push("/");
@@ -452,7 +455,7 @@ export default function BookPage() {
     }
   };
 
-  if (!isLoaded) return null;
+  if (!mounted || !isLoaded) return null;
 
   return (
     <div className="min-h-screen bg-black text-white selection:bg-red-600">
