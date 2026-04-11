@@ -13,6 +13,7 @@ class BookingCreate(BookingBase):
     slot_time: Optional[str] = None
     payment_method: Optional[str] = "CASH" # CASH, ECO_CASH, ONE_MONEY, INN_BUCKS
     payment_amount: Optional[float] = 0.0
+    poll_url: Optional[str] = None # Paynow poll URL stored after payment initiation
 
 class BookingUpdate(BaseModel):
     name: Optional[str] = None

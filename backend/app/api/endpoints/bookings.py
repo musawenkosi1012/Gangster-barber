@@ -68,7 +68,8 @@ def create_booking(req: BookingCreate, db: db_dependency):
                 booking_id=new_booking.id,
                 amount=req.payment_amount or 0.0,
                 provider=req.payment_method,
-                status="pending"
+                status="pending",
+                poll_url=req.poll_url
             )
             db.add(transaction)
             
@@ -191,3 +192,25 @@ def submit_payment_reference(req: PaymentVerification, db: db_dependency):
 @router.get("/user/{user_id}", response_model=List[BookingSchema])
 def get_user_bookings(user_id: str, db: db_dependency):
     return db.query(Booking).filter(Booking.user_id == user_id).order_by(Booking.booking_date.desc()).all()
+
+@router.get("/{booking_id}/payment-status")
+def get_payment_status(booking_id: int, db: db_dependency):
+    """
+    Frontend polls this to check if Paynow confirmed payment.
+    Returns booking status + transaction status.
+    """
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    transaction = db.query(PaymentTransaction).filter(
+        PaymentTransaction.booking_id == booking_id
+    ).order_by(PaymentTransaction.id.desc()).first()
+
+    return {
+        "booking_id": booking_id,
+        "booking_status": booking.status,  # PENDING, CONFIRMED, CANCELLED
+        "payment_status": transaction.status if transaction else "none",
+        "poll_url": transaction.poll_url if transaction else None,
+        "paid": booking.status in ["CONFIRMED", "PAID"],
+    }
