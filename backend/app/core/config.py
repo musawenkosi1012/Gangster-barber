@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     APP_PORT: int = int(os.getenv("APP_PORT", "8005"))
     
     # Clerk Auth
-    CLERK_SECRET_KEY: str = os.getenv("CLERK_SECRET_KEY", "sk_test_IvQdOmFD7fqhoD7ual7B3KAVt8lKc9FUkTmSIikc6R")
+    CLERK_SECRET_KEY: str = os.getenv("CLERK_SECRET_KEY", "")
     CLERK_JWT_ISSUER: str = os.getenv("CLERK_JWT_ISSUER", "https://adapted-tahr-3.clerk.accounts.dev")
     
     
@@ -38,6 +38,6 @@ class Settings(BaseSettings):
         return f"postgresql+psycopg2://{user}:{password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?sslmode=require"
 
     # CORS Config
-    ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3005")
+    ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3005,https://gangster-barber-frontend.vercel.app,https://gangster-barber.vercel.app,https://gangster-barber-paynow.vercel.app")
 
 settings = Settings()

@@ -9,3 +9,4 @@ httpx
 python-dotenv
 tzdata
 mangum>=0.17.0
+python-multipart

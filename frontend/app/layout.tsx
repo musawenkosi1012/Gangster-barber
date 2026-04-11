@@ -15,6 +15,31 @@ const playfair = Playfair_Display({
 export const metadata: Metadata = {
   title: "GANGSTER | The Syndicate Elite",
   description: "The Syndicate Pro Series. Surgical grade grooming for the untouchable.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.png", type: "image/png", sizes: "100x100" },
+    ],
+    apple: [
+      { url: "/apple-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+    other: [
+      { rel: "mask-icon", url: "/favicon.png", color: "#dc2626" },
+    ],
+  },
+  manifest: "/site.webmanifest",
+  openGraph: {
+    title: "GANGSTER BARBER | The Syndicate Elite",
+    description: "The Syndicate Pro Series. Surgical grade grooming for the untouchable.",
+    images: [{ url: "/logo.png", width: 500, height: 500, alt: "Gangster Barber" }],
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "GANGSTER BARBER",
+    description: "Surgical grade grooming for the untouchable.",
+    images: ["/logo.png"],
+  },
 };
 
 export const viewport = {
@@ -35,7 +60,7 @@ export default function RootLayout({
       <body className="text-white selection:bg-red-600 selection:text-white" suppressHydrationWarning>
 
         <ClerkProvider 
-          publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+          publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY!}
           appearance={{
             baseTheme: dark,
             variables: {
@@ -63,7 +88,7 @@ export default function RootLayout({
               formFieldErrorText: "text-red-500 font-bold text-[10px] uppercase tracking-widest mt-2 ml-1",
             }
           }}
-          unsafe_disableDevelopmentModeWarnings
+          unsafe_disableDevelopmentModeConsoleWarning
         >
           <div className="grain"></div>
           {children}

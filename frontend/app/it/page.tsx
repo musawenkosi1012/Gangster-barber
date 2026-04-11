@@ -16,8 +16,8 @@ export default function ITDashboard() {
         const token = await getToken();
         
         const [healthResp, logsResp] = await Promise.all([
-          syndicateFetch("/api/it/health", { headers: { Authorization: `Bearer ${token}` } }),
-          syndicateFetch("/api/it/audit-logs?limit=5", { headers: { Authorization: `Bearer ${token}` } })
+          syndicateFetch("/api/v1/it/system/health", { headers: { Authorization: `Bearer ${token}` } }),
+          syndicateFetch("/api/v1/it/security/audit-logs?limit=5", { headers: { Authorization: `Bearer ${token}` } })
         ]);
 
         if (healthResp.ok) setHealth(await healthResp.json());

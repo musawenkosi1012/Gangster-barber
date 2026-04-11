@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { SignInButton, SignOutButton, Show, UserButton } from "@clerk/nextjs";
 
 
@@ -108,12 +109,17 @@ export default function Navbar() {
           <div className="w-full max-w-[1400px] flex justify-between items-center px-6 md:px-12">
             {/* Logo */}
             <Link href="/" className="font-black text-white tracking-tighter text-xl md:text-2xl flex items-center gap-2 group">
-              <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-red-600/10 border border-red-600/20 group-hover:bg-red-600/20 group-hover:border-red-600/40 transition-all duration-500">
-                <ScissorsIcon />
-              </span>
+              <Image
+                src="/logo.png"
+                alt="Gangster Barber"
+                width={36}
+                height={36}
+                className="rounded-lg object-cover group-hover:scale-105 transition-transform duration-300"
+                priority
+              />
               <span className="relative">
                 GANGSTER<span className="text-red-600">.</span>
-                <span className="absolute -bottom-1 left-0 w-0 h-[2px] bg-red-600 group-hover:w-full transition-all duration-300 var(--ease-premium)"></span>
+                <span className="absolute -bottom-1 left-0 w-0 h-[2px] bg-red-600 group-hover:w-full transition-all duration-300"></span>
               </span>
             </Link>
 

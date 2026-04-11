@@ -6,8 +6,8 @@ load_dotenv()
 
 PAYNOW_INTEGRATION_ID = os.getenv("PAYNOW_INTEGRATION_ID")
 PAYNOW_INTEGRATION_KEY = os.getenv("PAYNOW_INTEGRATION_KEY")
-PAYNOW_RETURN_URL = os.getenv("PAYNOW_RETURN_URL", "http://localhost:3005/book/payment-complete")
-PAYNOW_RESULT_URL = os.getenv("PAYNOW_RESULT_URL", "http://localhost:8001/api/payments/webhook")
+PAYNOW_RETURN_URL = os.getenv("PAYNOW_RETURN_URL", "")
+PAYNOW_RESULT_URL = os.getenv("PAYNOW_RESULT_URL", "")
 
 
 def get_paynow_client() -> Paynow:

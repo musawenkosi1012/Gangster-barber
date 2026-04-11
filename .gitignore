@@ -1,6 +1,7 @@
 # Syndicate Intelligence - Global Ignore
 .env
 .env*
+.bin/
 __pycache__/
 *.pyc
 venv/

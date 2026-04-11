@@ -7,6 +7,7 @@ import Link from "next/link";
 import { syndicateFetch } from "@/utils/api";
 import { useRouter } from "next/navigation";
 import { BRAND } from "@/utils/constants";
+import Image from "next/image";
 
 interface Service {
   id: number;
@@ -32,11 +33,12 @@ const PAYMENT_LABELS: Record<string, string> = {
   paynow_onemoney: "OneMoney",
   paynow_innbucks: "InnBucks",
   paynow_omari: "O'Mari",
-  paynow_vmc: "Card",
-  paynow_zimswitch: "Zimswitch",
   paynow_web: "Web Pay",
   cash: "Cash"
 };
+
+// VMC (Visa/Mastercard) and ZimSwitch require real card tokenisation — not yet supported.
+// These methods are disabled until a card tokenisation flow is implemented.
 
 const parseSlotToDate = (dateStr: string, slotStr: string): Date => {
   const match = /(\d+):(\d+)\s*(AM|PM)?/i.exec(slotStr);
@@ -79,23 +81,21 @@ const calculateTimeDifference = (targetDate: Date): string => {
   return `${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
 };
 
-const buildPaymentPayload = (method: string, bookingId: number, formData: any, user: any, phoneNumber: string) => {
+const buildPaymentPayload = (method: string, paynowRef: string, formData: any, user: any, phoneNumber: string, amount: number) => {
   const email = user?.primaryEmailAddress?.emailAddress || "guest@gangster.com";
   const payload: any = {
-    booking_id: bookingId,
+    booking_id: paynowRef,  // Use UUID reference instead of 0 — booking doesn't exist yet
     customer_name: formData.name,
     customer_email: email,
     service: formData.service,
-    amount: BOOKING_DEPOSIT,
+    amount,
     payment_method: method
   };
 
   if (method === "mobile" || method === "onemoney" || method === "innbucks" || method === "omari") {
     payload.phone_number = phoneNumber;
   }
-  
-  if (method === "vmc") payload.token = "{11111111-1111-1111-1111-111111111111}";
-  if (method === "zimswitch") payload.token = "11111111111111111111111111111111";
+  // VMC and ZimSwitch require real card tokenisation — disabled until implemented
 
   return payload;
 };
@@ -122,28 +122,6 @@ const handlePaynowAction = (payData: any): boolean => {
 
   alert(message);
   return false;
-};
-
-const processPayment = async (paymentMethod: string, user: any, formData: any, bookingId: number, phoneNumber: string): Promise<boolean> => {
-  const paynowUrl = process.env.NEXT_PUBLIC_PAYNOW_URL || "http://localhost:8001";
-  const method = paymentMethod.replace("paynow_", "");
-  const payload = buildPaymentPayload(method, bookingId, formData, user, phoneNumber);
-
-  try {
-    const response = await syndicateFetch(`${paynowUrl}/api/payments/initiate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) return false;
-    
-    const payData = await response.json();
-    return handlePaynowAction(payData);
-  } catch (err) {
-    console.error("Payment sync failed:", err);
-    return false;
-  }
 };
 
 const checkActiveBookingUser = async (user: any, setSelectedDate: any, setAllocatedSlot: any, setBookingStatus: any) => {
@@ -306,7 +284,7 @@ export default function BookPage() {
   const { user, isLoaded } = useUser();
   const router = useRouter();
 
-  const [bookingStatus, setBookingStatus] = useState<"idle" | "booking" | "success" | "error">("idle");
+  const [bookingStatus, setBookingStatus] = useState<"idle" | "booking" | "awaiting_payment" | "verifying" | "payment_failed" | "success" | "error">("idle");
   const [allocatedSlot, setAllocatedSlot] = useState<string | null>(null);
   const [availableSlots, setAvailableSlots] = useState<Slot[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -315,12 +293,18 @@ export default function BookPage() {
   const [bookingMode, setBookingMode] = useState<"automatic" | "custom">("automatic");
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [paymentMethod, setPaymentMethod] = useState<"paynow_mobile" | "paynow_onemoney" | "paynow_innbucks" | "paynow_omari" | "paynow_vmc" | "paynow_zimswitch">("paynow_mobile");
+  const [paymentMethod, setPaymentMethod] = useState<"paynow_mobile" | "paynow_onemoney" | "paynow_innbucks" | "paynow_omari">("paynow_mobile");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [timeLeft, setTimeLeft] = useState<string>("");
   const [isSlotsLoading, setIsSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState(false);
   const [formData, setFormData] = useState({ name: "", service: "" });
+  const [payForCut, setPayForCut] = useState(false);
+  const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
+  const [paymentPollUrl, setPaymentPollUrl] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (isLoaded && !user) router.push("/");
@@ -372,11 +356,47 @@ export default function BookPage() {
     e.preventDefault();
     if (!selectedService) return alert("Select a style first.");
     if (bookingMode === "custom" && !selectedSlot) return alert("Select a slot.");
-    
+
     setBookingStatus("booking");
     try {
       const finalService = selectedService.name;
-      const response = await syndicateFetch("/api/book", {
+      const payAmount = payForCut
+        ? BOOKING_DEPOSIT + (selectedService?.price || 0)
+        : BOOKING_DEPOSIT;
+
+      // ─── STEP 1: Initiate payment FIRST ─────────────────────────────
+      // Use relative path — Next.js rewrite proxies /api/payments/* to PayNow service
+      const method = paymentMethod.replace("paynow_", "");
+      // Generate a unique reference for Paynow BEFORE the booking exists — avoids Appointment #0
+      const paynowRef = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `ref-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const payPayload = buildPaymentPayload(method, paynowRef, { ...formData, service: finalService }, user, phoneNumber, payAmount);
+
+      const payRes = await fetch(`/api/payments/initiate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payPayload),
+      });
+      const payData = await payRes.json();
+
+      if (!payData.success) {
+        alert(payData.error || "Payment initiation failed. Please try again.");
+        setBookingStatus("idle");
+        return;
+      }
+
+      // Web redirect flow (VMC/ZimSwitch) — redirect user, booking saved after webhook
+      if (payData.redirect_url) {
+        window.location.href = payData.redirect_url;
+        return;
+      }
+
+      const pollUrl = payData.poll_url || null;
+      setPaymentPollUrl(pollUrl);
+
+      // ─── STEP 2: Save booking as PENDING with poll_url ───────────────
+      const bookRes = await syndicateFetch("/api/book/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -384,30 +404,58 @@ export default function BookPage() {
           service: finalService,
           user_id: user?.id || "guest",
           slot_time: bookingMode === "custom" ? selectedSlot : null,
-          date: selectedDate,
+          booking_date: selectedDate,
+          payment_method: paymentMethod,
+          payment_amount: payAmount,
+          poll_url: pollUrl,
         }),
       });
-      if (!response.ok) throw new Error("Syndicate Booking Failed");
-      const data = await response.json();
-      
-      // Critical: Ensure the payment microservice gets the actual service name
-      const redirected = await processPayment(
-        paymentMethod, 
-        user, 
-        { ...formData, service: finalService }, 
-        data.id || 0, 
-        phoneNumber
-      );
-      
-      if (redirected) return;
-      setAllocatedSlot(data.slot_time);
-      setBookingStatus("success");
+      if (!bookRes.ok) throw new Error("Booking creation failed");
+      const bookData = await bookRes.json();
+
+      setPendingBookingId(bookData.id);
+      setAllocatedSlot(bookData.slot_time);
+
+      // ─── STEP 3: Show "awaiting payment" and poll until confirmed ────
+      setBookingStatus("awaiting_payment");
+
+      // Poll backend every 4 seconds for up to 5 minutes
+      const maxAttempts = 75;
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        try {
+          const statusRes = await syndicateFetch(`/api/book/${bookData.id}/payment-status`);
+          const statusData = await statusRes.json();
+
+          if (statusData.paid) {
+            clearInterval(poll);
+            setBookingStatus("success");
+            return;
+          }
+
+          if (statusData.payment_status === "failed") {
+            clearInterval(poll);
+            setBookingStatus("payment_failed");
+            return;
+          }
+        } catch {
+          // network hiccup — keep polling
+        }
+
+        if (attempts >= maxAttempts) {
+          clearInterval(poll);
+          // Timeout — show verifying state, admin can confirm manually
+          setBookingStatus("verifying");
+        }
+      }, 4000);
+
     } catch (err) {
       setBookingStatus("error");
     }
   };
 
-  if (!isLoaded) return null;
+  if (!mounted || !isLoaded) return null;
 
   return (
     <div className="min-h-screen bg-black text-white selection:bg-red-600">
@@ -420,7 +468,49 @@ export default function BookPage() {
         </div>
 
         <div className="w-full max-w-2xl bg-white/5 border border-white/5 rounded-3xl p-6 md:p-12 shadow-2xl backdrop-blur-xl relative z-10 overflow-hidden">
-          {bookingStatus === "success" ? (
+          {bookingStatus === "awaiting_payment" ? (
+            <div className="text-center py-12 flex flex-col items-center gap-6">
+              <div className="w-20 h-20 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                <svg className="w-8 h-8 text-amber-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">Awaiting Payment</h2>
+                <p className="text-white/40 text-sm uppercase tracking-widest font-bold">Check your phone and approve the payment prompt</p>
+              </div>
+              <div className="w-full bg-white/5 border border-white/5 rounded-2xl p-6">
+                <p className="text-[9px] font-black uppercase tracking-[0.3em] text-amber-500 mb-1">Your slot is reserved</p>
+                <p className="text-4xl font-black tracking-tighter">{allocatedSlot}</p>
+                <p className="text-white/30 text-[10px] mt-2 uppercase tracking-widest">{selectedDate}</p>
+              </div>
+              <p className="text-[9px] text-white/20 uppercase tracking-widest">This page will update automatically once payment is confirmed</p>
+            </div>
+          ) : bookingStatus === "verifying" ? (
+            <div className="text-center py-12 flex flex-col items-center gap-6">
+              <div className="w-20 h-20 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-3xl">⏳</div>
+              <div>
+                <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">Under Verification</h2>
+                <p className="text-white/40 text-sm font-bold leading-relaxed">Payment is being verified by our team.<br/>Your slot is held — we'll confirm shortly.</p>
+              </div>
+              <Link href="/dashboard" className="btn-booking py-5 px-10 text-[11px]">View My Booking</Link>
+            </div>
+          ) : bookingStatus === "payment_failed" ? (
+            <div className="text-center py-12 flex flex-col items-center gap-6">
+              <div className="w-20 h-20 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-3xl">✗</div>
+              <div>
+                <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">Payment Failed</h2>
+                <p className="text-white/40 text-sm font-bold">No charge was made. Please try again.</p>
+              </div>
+              <button
+                onClick={() => setBookingStatus("idle")}
+                className="btn-booking py-5 px-10 text-[11px]"
+              >
+                Try Again
+              </button>
+            </div>
+          ) : bookingStatus === "success" ? (
             <BookingSuccessView selectedDate={selectedDate} allocatedSlot={allocatedSlot!} timeLeft={timeLeft} />
           ) : (
             <form onSubmit={handleBooking} className="flex flex-col gap-10">
@@ -472,33 +562,78 @@ export default function BookPage() {
                    <div className="space-y-6">
                       <div className="flex p-5 bg-red-600/10 border border-red-600/20 rounded-2xl mb-4">
                         <p className="text-[9px] font-black uppercase tracking-[0.2em] text-red-500 leading-relaxed">
-                          Mission Detail: A ${BOOKING_DEPOSIT} reservation fee is required to secure your slot. The remaining service balance is payable at the shop.
+                          Mission Detail: A ${BOOKING_DEPOSIT} reservation fee is required to secure your slot. The remaining service balance can be paid now or at the shop.
                         </p>
                       </div>
+
+                      {/* Pay for cut checkbox */}
+                      <label className="flex items-start gap-4 p-5 bg-white/[0.03] border border-white/10 rounded-2xl cursor-pointer group hover:border-white/20 transition-all duration-300">
+                        <div className="relative mt-0.5 shrink-0">
+                          <input
+                            type="checkbox"
+                            className="sr-only"
+                            checked={payForCut}
+                            onChange={(e) => setPayForCut(e.target.checked)}
+                          />
+                          <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all duration-300 ${
+                            payForCut
+                              ? 'bg-red-600 border-red-600'
+                              : 'bg-transparent border-white/20 group-hover:border-white/40'
+                          }`}>
+                            {payForCut && (
+                              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Also pay for my cut now</span>
+                          <span className="text-[9px] font-medium text-white/30 uppercase tracking-widest">
+                            Pay ${selectedService?.price} service fee upfront — saves time at the shop
+                          </span>
+                        </div>
+                        <span className={`ml-auto text-sm font-black shrink-0 transition-colors duration-300 ${
+                          payForCut ? 'text-red-500' : 'text-white/20'
+                        }`}>
+                          ${selectedService?.price}
+                        </span>
+                      </label>
 
                       {selectedService && (
                         <div className="bg-white/5 border border-white/5 rounded-2xl p-6 space-y-4">
                            <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/40">
-                              <span>Service ({selectedService.name})</span>
-                              <span>${selectedService.price}</span>
+                              <span>Booking Fee (required)</span>
+                              <span className="text-white">${BOOKING_DEPOSIT}</span>
                            </div>
-                           <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/40">
-                              <span>Reservation Fee</span>
-                              <span>+ ${BOOKING_DEPOSIT}</span>
-                           </div>
+                           {payForCut && (
+                             <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/40">
+                                <span>Service — {selectedService.name}</span>
+                                <span>+ ${selectedService.price}</span>
+                             </div>
+                           )}
+                           {!payForCut && (
+                             <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/20 italic">
+                                <span>Service — {selectedService.name}</span>
+                                <span>Pay at shop</span>
+                             </div>
+                           )}
                            <div className="h-px bg-white/10"></div>
                            <div className="flex justify-between text-base font-black uppercase tracking-widest text-white">
                               <span>Total to Pay Now</span>
-                              <span className="text-red-600">${selectedService.price + BOOKING_DEPOSIT}</span>
+                              <span className="text-red-600">
+                                ${payForCut ? selectedService.price + BOOKING_DEPOSIT : BOOKING_DEPOSIT}
+                              </span>
                            </div>
                         </div>
                       )}
 
-                      <div className="grid grid-cols-2 sm:grid-cols-3 p-1 bg-white/5 border border-white/5 rounded-2xl gap-1">
-                        {["paynow_mobile", "paynow_onemoney", "paynow_innbucks", "paynow_omari", "paynow_vmc", "paynow_zimswitch"].map(m => (
+                      <div className="grid grid-cols-2 sm:grid-cols-2 p-1 bg-white/5 border border-white/5 rounded-2xl gap-1">
+                        {["paynow_mobile", "paynow_onemoney", "paynow_innbucks", "paynow_omari"].map(m => (
                           <button key={m} type="button" onClick={()=>setPaymentMethod(m as any)} className={getPaymentButtonStyle(m, paymentMethod)}>{PAYMENT_LABELS[m]}</button>
                         ))}
                       </div>
+                      <p className="text-[8px] font-medium text-center text-white/20 uppercase tracking-widest">Card (VMC) and ZimSwitch coming soon</p>
                       
                       <div className="space-y-3">
                          {["paynow_mobile", "paynow_onemoney", "paynow_innbucks", "paynow_omari"].includes(paymentMethod) && (
