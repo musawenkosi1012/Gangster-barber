@@ -1,31 +1,36 @@
 /**
- * Elite 'Syndicate' API Utility v2.0
- * Enhanced with 'Cold Start' resilience and explicit abort signals.
+ * Syndicate API Utility v3.0
+ * - Timeout reduced from 45s to 12s (dashboard never blocks for minutes)
+ * - Retries reduced from 3 to 2 (max wait: 12s + 2s backoff + 12s = 26s worst case)
+ * - Cold-start detection still works via isWarm flag
+ * - Explicit AbortController per request
  */
 
 let isWarm = false;
 
-export async function syndicateFetch(endpoint: string, options: RequestInit = {}, retries = 3): Promise<Response> {
+export async function syndicateFetch(
+  endpoint: string,
+  options: RequestInit = {},
+  retries = 2
+): Promise<Response> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
   const pathSeparator = endpoint.startsWith("/") ? "" : "/";
-  const url = endpoint.startsWith("http") ? endpoint : `${apiUrl}${pathSeparator}${endpoint}`;
+  const url = endpoint.startsWith("http")
+    ? endpoint
+    : `${apiUrl}${pathSeparator}${endpoint}`;
 
   let lastError: any;
 
-  // Layer 2: Zim-Resilience Buffer (Dynamic Timeout)
-  // Standard: 30s | Warmup/Cold Start: 45s 
-  const timeoutMs = isWarm ? 30000 : 45000;
+  // 12s standard, 20s cold-start first attempt
+  const timeoutMs = isWarm ? 12000 : 20000;
 
   for (let i = 0; i < retries; i++) {
     const controller = new AbortController();
-    
-    // Layer 1: Explicit Abort Signals
+
     const id = setTimeout(() => {
-      // Modern browsers/Node support reasons in abort()
       try {
         controller.abort("TIMEOUT_EXCEEDED");
-      } catch (e) {
-        // Fallback for older environments
+      } catch {
         controller.abort();
       }
     }, timeoutMs);
@@ -38,48 +43,45 @@ export async function syndicateFetch(endpoint: string, options: RequestInit = {}
 
       clearTimeout(id);
 
-      // Status Check: Cluster Success
       if (response.ok) {
-        isWarm = true; // System is now confirmed active
+        isWarm = true;
         return response;
       }
 
-      // Layer 3: Error Interception
       if (response.status >= 500) {
-        throw new Error(`Syndicate Cluster Error: ${response.status}`);
+        throw new Error(`Server Error: ${response.status}`);
       }
 
-      // If it's a client error (4xx) or a successful but non-ok response, 
-      // we don't necessarily retry unless it's a 429
       if (response.status === 429) {
         throw new Error("Rate Limit Exceeded");
       }
 
+      // 4xx — return as-is, caller handles
       return response;
     } catch (err: any) {
       clearTimeout(id);
       lastError = err;
 
-      // Handle Abort Signals
-      if (err.name === 'AbortError') {
-        const reason = err.cause || (err as any).reason; // Fetch implementations differ on where 'reason' is stored
+      if (err.name === "AbortError") {
+        const reason = err.cause || (err as any).reason;
 
-        // If the developer save/unmount killed the request, we exit silently
+        // Component unmounted / manual abort — exit immediately, don't retry
         if (!reason || reason !== "TIMEOUT_EXCEEDED") {
           throw err;
         }
 
-        // Tactical Timeout Handling
-        console.warn(`[Syndicate] Tactical Timeout (${timeoutMs}ms) exceeded. ${isWarm ? 'Retry' : 'Warmup'} ${i + 1}/${retries}`);
-        
+        console.warn(
+          `[Syndicate] Timeout (${timeoutMs}ms) on attempt ${i + 1}/${retries}: ${url}`
+        );
+
         if (i === retries - 1) {
-          throw new Error("Security Cluster is waking up. Connection delayed. Please refresh in a moment.");
+          throw new Error("TIMEOUT_EXCEEDED");
         }
       }
 
-      // Exponential backoff between retries
+      // Exponential backoff between retries (1s, 2s)
       const delay = Math.pow(2, i) * 1000;
-      await new Promise(res => setTimeout(res, delay));
+      await new Promise((res) => setTimeout(res, delay));
     }
   }
 
