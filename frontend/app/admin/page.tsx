@@ -174,15 +174,34 @@ export default function AdminDashboard() {
     [getToken]
   );
 
+  const [isTabVisible, setIsTabVisible] = useState(true);
+
   useEffect(() => {
     bootstrap(false);
 
-    // Refresh every 60s silently (don't replace content with skeleton on auto-refresh)
-    intervalRef.current = setInterval(() => bootstrap(true), 60000);
+    // Refresh every 30s silently
+    intervalRef.current = setInterval(() => bootstrap(true), 30000);
+
+    const handleVisibility = () => {
+      const visible = document.visibilityState === "visible";
+      setIsTabVisible(visible);
+      if (visible) {
+        // Resume: fetch immediately and restart interval
+        bootstrap(true);
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        intervalRef.current = setInterval(() => bootstrap(true), 30000);
+      } else {
+        // Pause polling when tab is hidden
+        if (intervalRef.current) clearInterval(intervalRef.current);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
       abortRef.current?.abort();
       if (intervalRef.current) clearInterval(intervalRef.current);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [bootstrap]);
 
@@ -249,13 +268,14 @@ export default function AdminDashboard() {
     ? data.schedule_preview.length > 0 || (kpis?.completed_sessions ?? 0) > 0
     : false;
 
-  // Sync status: show AUTHORIZED when data is loaded, SYNCING when refreshing silently
-  const syncLabel =
-    fetchState === "loading" && data
-      ? "SYNCING..."
-      : data
-      ? "AUTHORIZED"
-      : "OFFLINE";
+  // Auto-refresh status
+  const syncLabel = !isTabVisible
+    ? "PAUSED"
+    : fetchState === "loading" && data
+    ? "SYNCING..."
+    : data
+    ? "ON"
+    : "CONNECTING...";
 
   return (
     <div className="space-y-16 lg:space-y-24">
@@ -308,10 +328,10 @@ export default function AdminDashboard() {
             <h3 className="text-xs font-black uppercase tracking-[0.4em] text-red-600">Flash Schedule Preview</h3>
             <div className="flex items-center gap-2">
               {data && fetchState !== "error" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isTabVisible ? "bg-emerald-500" : "bg-amber-500"}`} />
               )}
               <span className="text-[10px] font-black text-white/10 uppercase tracking-widest font-mono">
-                Live Sync: {syncLabel}
+                Auto-Refresh: {syncLabel}
               </span>
             </div>
           </div>

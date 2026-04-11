@@ -38,6 +38,6 @@ class Settings(BaseSettings):
         return f"postgresql+psycopg2://{user}:{password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?sslmode=require"
 
     # CORS Config
-    ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "")
+    ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3005,https://gangster-barber-frontend.vercel.app,https://gangster-barber.vercel.app,https://gangster-barber-paynow.vercel.app")
 
 settings = Settings()

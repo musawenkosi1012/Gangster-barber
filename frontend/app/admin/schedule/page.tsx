@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { syndicateFetch } from "@/utils/api";
 
@@ -40,6 +40,8 @@ export default function AdminSchedule() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [selectedItem, setSelectedItem] = useState<{ type: 'booking' | 'slot', data: any } | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const getHarareNow = () => {
     return new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Harare" }));
@@ -57,9 +59,11 @@ export default function AdminSchedule() {
     return slotEnd < now ? 'passed' : 'available';
   };
 
-  const fetchSchedule = useCallback(async () => {
-    setIsLoading(true);
-    setHasError(false);
+  const fetchSchedule = useCallback(async (silent = false) => {
+    if (!silent) {
+      setIsLoading(true);
+      setHasError(false);
+    }
     try {
       const token = await getToken();
       const slotsResp = await syndicateFetch(`/api/book/slots?date=${selectedDate}`);
@@ -73,15 +77,24 @@ export default function AdminSchedule() {
         const bookingsData = await bookingsResp.json();
         setBookings(Array.isArray(bookingsData) ? bookingsData : []);
       }
+      setHasError(false);
+      setLastUpdated(new Date());
     } catch (e) {
-      setHasError(true);
+      if (!silent) setHasError(true);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, [selectedDate, getToken]);
 
   useEffect(() => {
-    fetchSchedule();
+    fetchSchedule(false);
+
+    // Poll every 30 seconds silently
+    intervalRef.current = setInterval(() => fetchSchedule(true), 30000);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [fetchSchedule]);
 
   const handleTransition = async (bookingId: number, status: string) => {
@@ -137,8 +150,10 @@ export default function AdminSchedule() {
             Timeline <span className="text-red-600">Controller</span>
           </h1>
           <p className="text-white/20 font-bold uppercase tracking-[0.4em] text-[9px] flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>
-            Operational Stream • Cluster Sync Active
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            {lastUpdated
+              ? `Auto-Refresh: ON · Updated ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+              : "Loading..."}
           </p>
         </div>
         
@@ -157,8 +172,14 @@ export default function AdminSchedule() {
 
       {hasError && (
         <div className="mb-12 p-8 rounded-[2rem] bg-red-600/5 border border-red-600/20 text-center animate-in fade-in slide-in-from-top-4 duration-500">
-           <p className="text-[10px] font-black uppercase tracking-[0.4em] text-red-600">Protocol Disruption</p>
-           <p className="text-white/40 text-[10px] mt-2">Operational sync service experienced a tactical failure. Attempting reconnection...</p>
+           <p className="text-[10px] font-black uppercase tracking-[0.4em] text-red-600">Could Not Load Schedule</p>
+           <p className="text-white/40 text-[10px] mt-2">The backend could not be reached. Check your connection or try again.</p>
+           <button
+             onClick={() => fetchSchedule(false)}
+             className="mt-4 px-6 py-3 bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-white/60 rounded-xl hover:bg-white/10 transition-all"
+           >
+             Retry
+           </button>
         </div>
       )}
 
@@ -167,6 +188,20 @@ export default function AdminSchedule() {
           {[...Array(12)].map((_, i) => (
             <div key={i} className="h-44 bg-white/5 rounded-[2rem] border border-white/5 animate-pulse" />
           ))}
+        </div>
+      ) : slots.length === 0 ? (
+        <div className="flex flex-col items-center justify-center min-h-[40vh] gap-6">
+          <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-2xl text-white/20">0</div>
+          <div className="text-center">
+            <h2 className="text-lg font-black uppercase tracking-tighter mb-2 text-white/40">No Bookings</h2>
+            <p className="text-white/20 text-xs font-bold">No slots available for {selectedDate}</p>
+          </div>
+          <button
+            onClick={() => fetchSchedule(false)}
+            className="px-6 py-3 bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-white/60 rounded-xl hover:bg-white/10 transition-all"
+          >
+            Refresh
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
