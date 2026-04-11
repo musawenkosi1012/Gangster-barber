@@ -44,15 +44,14 @@ class HealthService:
         """Analyzes the success rate of the last 10 payment callbacks."""
         last_payments = db.query(PaymentTransaction).order_by(PaymentTransaction.created_at.desc()).limit(10).all()
         if not last_payments:
-            return {"status": "OPERATIONAL", "latency": 0} # No data yet
-            
+            return {"status": "NO_DATA", "latency": None, "failures": 0}
+
         failures = len([p for p in last_payments if p.status == "failed"])
-        # We simulate a latency check for the gateway ping
-        latency = 42 # Tactical average
-        status = "DEGRADED" if failures > 2 else "OPERATIONAL"
-        if failures > 5: status = "DOWN"
-        
-        return {"status": status, "latency": latency, "failures": failures}
+        total = len(last_payments)
+        success_rate = round(((total - failures) / total) * 100, 1)
+        status = "OPERATIONAL" if failures <= 2 else ("DEGRADED" if failures <= 5 else "DOWN")
+
+        return {"status": status, "latency": None, "failures": failures, "success_rate": success_rate}
 
     def calculate_uptime(self, db: Session, days: int = 30) -> float:
         """Computes the ratio of operational intervals over a rolling window."""
@@ -91,12 +90,38 @@ class HealthService:
         db.add(SystemHealthLog(service="GATEWAY", status=gateway_health["status"], latency_ms=gateway_health.get("latency", 0)))
         db.commit()
         
+        uptime = self.calculate_uptime(db)
+
+        # Determine auth status label
+        if auth_health["status"] == "OPERATIONAL":
+            auth_label = "synced"
+        elif auth_health["status"] == "DEGRADED":
+            auth_label = "degraded"
+        else:
+            auth_label = "unreachable"
+
+        # Determine payments status label
+        gateway_status = gateway_health["status"]
+        if gateway_status == "OPERATIONAL":
+            payments_label = "operational"
+        elif gateway_status == "NO_DATA":
+            payments_label = "no_data"
+        elif gateway_status == "DEGRADED":
+            payments_label = "degraded"
+        else:
+            payments_label = "down"
+
         return {
-            "database": db_health,
-            "auth": auth_health,
-            "gateway": gateway_health,
-            "uptime": self.calculate_uptime(db),
-            "cluster": "8005-A"
+            "database": db_health["status"].lower(),           # e.g. "operational", "degraded", "down"
+            "database_latency_ms": db_health.get("latency"),  # real ms or -1
+            "auth": auth_label,                                # "synced", "degraded", "unreachable"
+            "auth_latency_ms": auth_health.get("latency"),
+            "payments": payments_label,                        # "operational", "no_data", "degraded", "down"
+            "payments_failures": gateway_health.get("failures", 0),
+            "payments_success_rate": gateway_health.get("success_rate", None),
+            "uptime": uptime,                                  # real computed value, 0.0–100.0
+            "uptime_has_data": db.query(SystemHealthLog).count() > 0,
+            "cluster": "GB-API-A"
         }
 
 health_service = HealthService()

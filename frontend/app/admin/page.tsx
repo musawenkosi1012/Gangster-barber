@@ -32,22 +32,32 @@ interface BootstrapData {
     oldest_pending: string;
   };
   integrity: {
+    // All strings — "operational" | "degraded" | "down" | "synced" | "unreachable" | "no_data"
     database: string;
+    database_latency_ms: number | null;
     auth: string;
+    auth_latency_ms: number | null;
     payments: string;
+    payments_failures: number;
+    payments_success_rate: number | null;
     uptime: number;
+    uptime_has_data: boolean;
     cluster: string;
   };
 }
 
-const KPICard = ({ label, value, note, colorClass = "bg-white/5" }: any) => (
+const KPICard = ({ label, value, note, colorClass = "bg-white/5", noData = false }: any) => (
   <div className="bg-white/[0.02] border border-white/5 p-8 rounded-[2rem] hover:bg-white/[0.04] transition-all group relative overflow-hidden h-full">
     <div className={`absolute -top-4 -right-4 w-20 h-20 blur-3xl opacity-20 group-hover:opacity-40 transition-opacity ${colorClass}`}></div>
     <p className="text-[10px] font-black uppercase tracking-[0.25em] text-white/20 mb-6">{label}</p>
     <div className="flex items-baseline gap-1">
-      <p className="text-4xl md:text-5xl font-black tracking-tighter italic leading-none truncate">{value}</p>
+      <p className={`text-4xl md:text-5xl font-black tracking-tighter italic leading-none truncate ${noData ? 'text-white/20' : ''}`}>
+        {noData ? '—' : value}
+      </p>
     </div>
-    <p className="text-[9px] font-bold text-white/10 uppercase tracking-widest mt-6">{note}</p>
+    <p className="text-[9px] font-bold text-white/10 uppercase tracking-widest mt-6">
+      {noData ? 'No data for today' : note}
+    </p>
   </div>
 );
 
@@ -144,34 +154,40 @@ export default function AdminDashboard() {
   }
 
   const kpis = data?.kpis;
+  // A day has "no data" when there are literally zero bookings today
+  const hasBookingsToday = data ? (data.schedule_preview.length > 0 || (kpis?.completed_sessions ?? 0) > 0) : false;
 
   return (
     <div className="space-y-16 lg:space-y-24">
-      {/* 📊 High-Performance KPI Grid */}
+      {/* KPI Grid */}
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8">
-        <KPICard 
-          label="Today's Revenue" 
-          value={`$${kpis?.revenue || 0}`} 
-          note={`${kpis?.completed_sessions || 0} COMPLETED SESSIONS`} 
+        <KPICard
+          label="Today's Revenue"
+          value={`$${kpis?.revenue ?? 0}`}
+          note={`${kpis?.completed_sessions ?? 0} COMPLETED SESSIONS`}
           colorClass="bg-emerald-600"
+          noData={!data}
         />
-        <KPICard 
-          label="Daily Load" 
-          value={`${kpis?.daily_load_pct || 0}%`} 
-          note="ACTIVE CAPACITY" 
+        <KPICard
+          label="Daily Load"
+          value={`${kpis?.daily_load_pct ?? 0}%`}
+          note="ACTIVE CAPACITY"
           colorClass="bg-red-600"
+          noData={!data}
         />
-        <KPICard 
-          label="No-Show Rate" 
-          value={`${kpis?.no_show_rate || 0}%`} 
-          note="OPERATIONAL RELIABILITY" 
+        <KPICard
+          label="No-Show Rate"
+          value={`${kpis?.no_show_rate ?? 0}%`}
+          note={hasBookingsToday ? "OPERATIONAL RELIABILITY" : "NO SESSIONS YET TODAY"}
           colorClass="bg-orange-600"
+          noData={!data}
         />
-        <KPICard 
-          label="Next Arrival" 
-          value={kpis?.next_arrival.time || "NONE"} 
-          note={kpis?.next_arrival.name.toUpperCase() || "TIMELINE CLEAR"} 
+        <KPICard
+          label="Next Arrival"
+          value={kpis?.next_arrival?.time || "—"}
+          note={kpis?.next_arrival?.name?.toUpperCase() || "NO CONFIRMED BOOKINGS"}
           colorClass="bg-blue-600"
+          noData={!data}
         />
       </section>
 
@@ -208,72 +224,119 @@ export default function AdminDashboard() {
 
         {/* 🛡️ Alerts & System Integrity */}
         <aside className="space-y-8">
-           {/* Urgent Intervention Card - Only shows if there are pending alerts */}
-           {data?.alerts.unresolved_count && data.alerts.unresolved_count > 0 ? (
+           {/* Payment Alerts Card */}
+           {!data ? (
+             // No data loaded yet — don't show any integrity claim
+             <div className="p-8 rounded-[2.5rem] bg-white/[0.02] border border-white/5 text-center">
+               <p className="text-[9px] font-black uppercase tracking-[0.4em] text-white/20">Payment Status</p>
+               <p className="text-[8px] font-bold text-white/10 mt-2">Loading ledger data…</p>
+             </div>
+           ) : data.alerts.unresolved_count > 0 ? (
              <div className="p-8 rounded-[2.5rem] bg-gradient-to-br from-red-600/20 to-transparent border border-red-600/30 animate-in zoom-in-95 duration-500">
-                <div className="flex items-center gap-3 mb-6">
-                   <div className="w-2 h-2 rounded-full bg-red-600 animate-ping"></div>
-                   <h4 className="text-[10px] font-black uppercase tracking-widest">Urgent Action Required</h4>
-                </div>
-                <p className="text-sm font-black italic leading-tight text-red-100/90 mb-8">
-                  {data.alerts.unresolved_count} Payments ({data.alerts.method}) are awaiting manual cross-reference verification.
-                </p>
-                <p className="text-[9px] font-bold text-red-500/50 uppercase tracking-widest mb-4">Oldest Pending: {data.alerts.oldest_pending}</p>
-                <button className="w-full py-4 bg-white text-black text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl hover:bg-red-600 hover:text-white transition-all shadow-2xl">
-                  Open Ledger
-                </button>
+               <div className="flex items-center gap-3 mb-6">
+                 <div className="w-2 h-2 rounded-full bg-red-600 animate-ping"></div>
+                 <h4 className="text-[10px] font-black uppercase tracking-widest">Urgent Action Required</h4>
+               </div>
+               <p className="text-sm font-black italic leading-tight text-red-100/90 mb-8">
+                 {data.alerts.unresolved_count} payment{data.alerts.unresolved_count > 1 ? 's' : ''} ({data.alerts.method}) awaiting manual verification.
+               </p>
+               <p className="text-[9px] font-bold text-red-500/50 uppercase tracking-widest mb-4">Oldest Pending: {data.alerts.oldest_pending}</p>
+               <button className="w-full py-4 bg-white text-black text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl hover:bg-red-600 hover:text-white transition-all shadow-2xl">
+                 Open Ledger
+               </button>
              </div>
            ) : (
              <div className="p-8 rounded-[2.5rem] bg-emerald-600/5 border border-emerald-500/10 text-center">
-                <p className="text-[9px] font-black uppercase tracking-[0.4em] text-emerald-500/40">Financial Integrity: 100%</p>
-                <p className="text-[8px] font-bold text-white/10 mt-2">All mobile money transactions resolved.</p>
+               <p className="text-[9px] font-black uppercase tracking-[0.4em] text-emerald-500/40">Ledger Clear</p>
+               <p className="text-[8px] font-bold text-white/10 mt-2">No unresolved payment transactions.</p>
              </div>
            )}
 
            {/* Health Monitor Card */}
            <div className="p-10 rounded-[2.5rem] bg-white/[0.02] border border-white/5">
-              <h4 className="text-[10px] font-black uppercase tracking-[0.25em] text-white/20 mb-8">Internal Integrity Engine</h4>
-              <div className="space-y-6">
-                 {[ 
-                   { 
-                     l: "Database", 
-                     s: data?.integrity.database, 
-                     m: `${data?.integrity.database === 'operational' ? 'Stable' : 'Latency'}: ${data?.integrity.uptime}%`,
-                     c: data?.integrity.database === 'operational' ? "bg-emerald-500 animate-pulse" : (data?.integrity.database === 'degraded' ? "bg-amber-500" : "bg-red-500") 
+             <h4 className="text-[10px] font-black uppercase tracking-[0.25em] text-white/20 mb-8">System Health</h4>
+             {!data ? (
+               <div className="space-y-4">
+                 {[1,2,3].map(i => <div key={i} className="h-6 bg-white/5 rounded-full animate-pulse" />)}
+               </div>
+             ) : (
+               <div className="space-y-6">
+                 {([
+                   {
+                     l: "Database",
+                     s: data.integrity.database,
+                     detail: data.integrity.database_latency_ms != null
+                       ? `${data.integrity.database_latency_ms}ms latency`
+                       : "latency unavailable",
+                     dot: data.integrity.database === "operational"
+                       ? "bg-emerald-500 animate-pulse"
+                       : data.integrity.database === "degraded"
+                       ? "bg-amber-500"
+                       : "bg-red-500",
                    },
-                   { 
-                     l: "Auth Cluster", 
-                     s: data?.integrity.auth, 
-                     m: "Clerk Synced",
-                     c: data?.integrity.auth === 'synced' ? "bg-emerald-500 animate-pulse" : "bg-red-500" 
+                   {
+                     l: "Auth (Clerk)",
+                     s: data.integrity.auth,
+                     detail: data.integrity.auth_latency_ms != null
+                       ? `${data.integrity.auth_latency_ms}ms`
+                       : "not measured",
+                     dot: data.integrity.auth === "synced"
+                       ? "bg-emerald-500 animate-pulse"
+                       : data.integrity.auth === "degraded"
+                       ? "bg-amber-500"
+                       : "bg-red-500",
                    },
-                   { 
-                     l: "Payment Gateway", 
-                     s: data?.integrity.payments, 
-                     m: "Paynow Active",
-                     c: data?.integrity.payments === 'operational' ? "bg-emerald-500 animate-pulse" : "bg-amber-500" 
-                   }
-                 ].map(item => (
+                   {
+                     l: "Payment Gateway",
+                     s: data.integrity.payments === "no_data" ? "no transactions yet" : data.integrity.payments,
+                     detail: data.integrity.payments_success_rate != null
+                       ? `${data.integrity.payments_success_rate}% success rate`
+                       : "no transaction history",
+                     dot: data.integrity.payments === "operational"
+                       ? "bg-emerald-500 animate-pulse"
+                       : data.integrity.payments === "no_data"
+                       ? "bg-white/20"
+                       : data.integrity.payments === "degraded"
+                       ? "bg-amber-500"
+                       : "bg-red-500",
+                   },
+                 ] as const).map((item) => (
                    <div key={item.l} className="flex justify-between items-center group relative cursor-help">
-                     <span className="text-[10px] font-black uppercase tracking-widest text-white/40 group-hover:text-white transition-colors">{item.l}</span>
+                     <span className="text-[10px] font-black uppercase tracking-widest text-white/40 group-hover:text-white transition-colors">
+                       {item.l}
+                     </span>
                      <div className="flex items-center gap-3">
-                        <span className="text-[9px] font-black uppercase tracking-widest text-white/60">{item.s}</span>
-                        <div className={`w-1.5 h-1.5 rounded-full ${item.c} shadow-[0_0_10px_currentColor]`}></div>
+                       <span className="text-[9px] font-black uppercase tracking-widest text-white/60">{item.s}</span>
+                       <div className={`w-1.5 h-1.5 rounded-full ${item.dot}`} />
                      </div>
-                     
-                     {/* Truth Tooltip */}
+                     {/* Tooltip with real data */}
                      <div className="absolute left-0 bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black border border-white/10 px-3 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest whitespace-nowrap z-50 pointer-events-none">
-                        Telemetry: {item.m}
+                       {item.detail}
                      </div>
                    </div>
                  ))}
-              </div>
-              <div className="mt-10 pt-6 border-t border-white/5 flex justify-between items-center">
-                 <span className="text-[8px] font-bold text-white/10 uppercase tracking-widest">Node ID: {data?.integrity.cluster}</span>
-                 <p className={`text-[8px] font-black uppercase tracking-widest ${data?.integrity.uptime && data.integrity.uptime < 98 ? 'text-amber-500' : 'text-emerald-500/50'}`}>
-                   Hard Uptime {data?.integrity.uptime || 99.9}%
-                 </p>
-              </div>
+               </div>
+             )}
+             <div className="mt-10 pt-6 border-t border-white/5 flex justify-between items-center">
+               <span className="text-[8px] font-bold text-white/10 uppercase tracking-widest">
+                 Node: {data?.integrity.cluster ?? '—'}
+               </span>
+               {data ? (
+                 data.integrity.uptime_has_data ? (
+                   <p className={`text-[8px] font-black uppercase tracking-widest ${
+                     data.integrity.uptime < 98 ? 'text-amber-500' : 'text-emerald-500/60'
+                   }`}>
+                     Uptime {data.integrity.uptime}% · 30d
+                   </p>
+                 ) : (
+                   <p className="text-[8px] font-black uppercase tracking-widest text-white/20">
+                     Uptime: collecting data…
+                   </p>
+                 )
+               ) : (
+                 <p className="text-[8px] font-black uppercase tracking-widest text-white/20">—</p>
+               )}
+             </div>
            </div>
         </aside>
 
