@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from ...schemas.booking import BookingCreate, Booking as BookingSchema, BookingUpdate
 from ...services.scheduler import scheduler
 from ...db.base import get_db
@@ -88,7 +88,7 @@ def create_booking(req: BookingCreate, db: db_dependency, user: dict = Depends(g
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="This slot was just taken by someone else. Please try another time.")
-    except Exception as e:
+    except SQLAlchemyError as e:
         db.rollback()
         print(f"Database error: {e}")
         raise HTTPException(status_code=500, detail="Failed to save booking to database")
@@ -129,7 +129,7 @@ def update_booking(booking_id: int, req: BookingUpdate, db: db_dependency, user:
         db.commit()
         db.refresh(db_booking)
         return db_booking
-    except Exception as e:
+    except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Safe-Commit Failure: Logic state inconsistent")
 
@@ -149,7 +149,7 @@ def delete_booking(booking_id: int, db: db_dependency, user: dict = Depends(get_
         db.delete(db_booking)
         db.commit()
         return {"message": "Booking cancelled successfully"}
-    except Exception:
+    except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Decommissioning failed")
 
@@ -203,7 +203,7 @@ def submit_payment_reference(req: PaymentVerification, db: db_dependency):
         db.add(audit)
         db.commit()
         return {"message": "Reference submitted. Verification in progress."}
-    except Exception:
+    except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Financial registry update failed")
 
@@ -304,6 +304,6 @@ def confirm_booking(booking_id: int, request: Request, db: db_dependency):
         booking.status = "CONFIRMED"
         db.commit()
         return {"status": "CONFIRMED", "booking_id": booking_id}
-    except Exception:
+    except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Final commitment state transition failed")

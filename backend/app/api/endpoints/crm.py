@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
+from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Optional, Dict, Any
 from ...db.base import get_db
 from ...models.crm import Customer as CustomerModel
@@ -120,6 +121,6 @@ def patch_customer_intelligence(
         db.commit()
         db.refresh(customer)
         return customer
-    except Exception:
+    except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Safe-Commit Failure: Identity record locked")

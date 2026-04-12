@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Optional
 import re
 import shutil
@@ -90,9 +91,12 @@ async def create_service_unified(
         db.commit()
         db.refresh(db_service)
         return db_service
-    except Exception as e:
+    except SQLAlchemyError as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"System collision during catalog ingestion: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Logic collision: {str(e)}")
 
 @router.patch("/admin/services/{service_id}", response_model=Service)
 async def update_service_unified(
@@ -140,9 +144,12 @@ async def update_service_unified(
         db.commit()
         db.refresh(db_service)
         return db_service
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Atomic update failure: {str(e)}")
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Atomic update failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Logic update failure: {str(e)}")
 
 # --- 🏗️ Asset Management ---
 
@@ -181,9 +188,12 @@ async def upload_multiple_service_images(
             "images_uploaded": len(saved_images),
             "service_id": service_id
         }
-    except Exception as e:
+    except SQLAlchemyError as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Multi-asset ingestion failed: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Asset logic failed: {str(e)}")
 
 @router.delete("/admin/services/images/{image_id}", dependencies=[Depends(require_role(["admin", "it_admin", "owner"]))])
 def delete_service_image(image_id: int, db: Session = Depends(get_db)):
@@ -196,6 +206,6 @@ def delete_service_image(image_id: int, db: Session = Depends(get_db)):
         db.delete(img)
         db.commit()
         return {"status": "success", "message": "Asset decommissioned"}
-    except Exception as e:
+    except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to decommission asset")

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ...db.base import get_db
 from ...models import Booking, BlockedSlot, Service, AuditLog, PaymentTransaction, SystemAlert, Notification, PaymentEvent
+from sqlalchemy.exc import SQLAlchemyError
 from ...schemas.booking import Booking as BookingSchema, BookingUpdate
 from ...schemas.operational import AdminStats, BlockedSlotCreate, BlockedSlot as BlockedSlotSchema
 from ...services.scheduler import scheduler
@@ -36,7 +37,7 @@ def transition_booking(booking_id: int, to_status: str, db: Session = Depends(ge
         db.add(audit)
         db.commit()
         return {"message": "Transition successful", "status": booking.status}
-    except Exception:
+    except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Safe-Commit Failure: Lifecycle state inconsistent")
 
@@ -160,7 +161,7 @@ def block_slot(req: BlockedSlotCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_block)
         return new_block
-    except Exception:
+    except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Database lock failure on slot segment")
 
@@ -177,7 +178,7 @@ def resolve_notification(notif_id: int, db: Session = Depends(get_db)):
             notif.is_resolved = True
             db.commit()
             return {"message": "Resolved"}
-        except Exception:
+        except SQLAlchemyError:
             db.rollback()
             raise HTTPException(status_code=500, detail="State persistence failure")
     raise HTTPException(status_code=404, detail="Notification not found")
@@ -226,7 +227,7 @@ def match_transaction(tx_id: int, booking_id: int, db: Session = Depends(get_db)
     try:
         db.commit()
         return {"message": "Reconciliation successful"}
-    except Exception:
+    except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Manual reconciliation handshake failed")
 
@@ -238,6 +239,6 @@ def unblock_slot(block_id: int, db: Session = Depends(get_db)):
         db.delete(db_block)
         db.commit()
         return {"message": "Unblocked"}
-    except Exception:
+    except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Resource release protocol failure")
