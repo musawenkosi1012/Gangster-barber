@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { SignInButton, SignOutButton, Show, UserButton } from "@clerk/nextjs";
+import { SignInButton, SignOutButton, UserButton, useAuth } from "@clerk/nextjs";
 
 
 
@@ -41,6 +41,7 @@ const MapPinIcon = () => (
 );
 
 export default function Navbar() {
+  const { isLoaded, isSignedIn } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [hidden, setHidden] = useState(false);
@@ -143,30 +144,29 @@ export default function Navbar() {
               <div className="mx-3 w-px h-5 bg-white/10"></div>
               
               <div className="flex items-center gap-3">
-                <Show when="signed-out">
-                  <SignInButton mode="modal" forceRedirectUrl="/book">
-                    <button className="px-6 py-2 text-[12px] font-medium tracking-wide text-white/60 hover:text-white transition-colors duration-300">
-                      Sign In
-                    </button>
-                  </SignInButton>
-                  <SignInButton mode="modal" forceRedirectUrl="/book">
-                    <button className="btn-booking-nav ml-2">
-                      Book Now
-                    </button>
-                  </SignInButton>
-                </Show>
-
-                <Show when="signed-in">
+                {!isLoaded && (
+                  <Link href="/book" className="btn-booking-nav ml-2">Book Now</Link>
+                )}
+                {isLoaded && !isSignedIn && (
+                  <>
+                    <SignInButton mode="modal" forceRedirectUrl="/book">
+                      <button className="px-6 py-2 text-[12px] font-medium tracking-wide text-white/60 hover:text-white transition-colors duration-300">
+                        Sign In
+                      </button>
+                    </SignInButton>
+                    <SignInButton mode="modal" forceRedirectUrl="/book">
+                      <button className="btn-booking-nav ml-2">Book Now</button>
+                    </SignInButton>
+                  </>
+                )}
+                {isLoaded && isSignedIn && (
                   <div className="flex items-center gap-4">
                     <UserButton />
                     <SignOutButton>
-                      <button className="btn-booking-nav">
-                        Sign Out
-                      </button>
+                      <button className="btn-booking-nav">Sign Out</button>
                     </SignOutButton>
                   </div>
-                </Show>
-
+                )}
               </div>
 
             </div>
@@ -217,18 +217,26 @@ export default function Navbar() {
 
           {/* mobile auth buttons */}
           <div className={`flex flex-col items-center mt-4 transition-all duration-700 ${isOpen ? "translate-y-0 opacity-100" : "translate-y-8 opacity-0"}`} style={{ transitionDelay: isOpen ? "200ms" : "0ms" }}>
-            <Show when="signed-out">
+            {!isLoaded && (
+              <Link
+                href="/book"
+                onClick={() => setIsOpen(false)}
+                className="text-4xl font-black tracking-tight hover:text-red-600 transition-all duration-500 py-2 uppercase text-white"
+              >
+                Book Now
+              </Link>
+            )}
+            {isLoaded && !isSignedIn && (
               <SignInButton mode="modal" forceRedirectUrl="/book">
-                <button 
-                  onClick={() => setIsOpen(false)} 
+                <button
+                  onClick={() => setIsOpen(false)}
                   className="text-4xl font-black tracking-tight hover:text-red-600 transition-all duration-500 py-2 uppercase text-white/40"
                 >
                   Sign In
                 </button>
               </SignInButton>
-            </Show>
-
-            <Show when="signed-in">
+            )}
+            {isLoaded && isSignedIn && (
               <div className="flex flex-col items-center gap-4 mt-6">
                 <div className="group relative">
                   <div className="absolute -inset-1 bg-red-600/20 rounded-full blur-md group-hover:bg-red-600/40 transition-all duration-500"></div>
@@ -238,7 +246,7 @@ export default function Navbar() {
                 </div>
                 <span className="text-[10px] font-black tracking-[0.3em] uppercase text-white/30">Member Access</span>
               </div>
-            </Show>
+            )}
           </div>
         </div>
 
