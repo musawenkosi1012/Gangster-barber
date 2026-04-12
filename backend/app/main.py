@@ -10,6 +10,8 @@ from .api.endpoints.services import router as services_router
 from .api.endpoints.health import router as health_router
 from .core.config import settings
 from .db.base import init_db
+import traceback
+import sys
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,6 +36,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi.staticfiles import StaticFiles
+import os
+
 # Connect Routers
 app.include_router(bookings_router, prefix="/api/book", tags=["Bookings"])
 app.include_router(crm_router, tags=["Customer CRM"])
@@ -42,6 +47,25 @@ app.include_router(admin_router, tags=["Admin Operations"])
 app.include_router(it_router, tags=["IT Operations"])
 app.include_router(health_router, tags=["Health"])
 app.include_router(auth_router, tags=["Identity & Auth"])
+
+# Serve Static Assets (Portfolios/Uploads)
+if os.path.exists("backend/static"):
+    app.mount("/static", StaticFiles(directory="backend/static"), name="static")
+elif os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Forensic Integrity Guard: Captures all unhandled exceptions and prints tracebacks.
+    In the 2026 Admin Terminal, zero-visibility 500 errors are unacceptable.
+    """
+    print(f"CRITICAL SYSTEM ERROR: {exc}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    return Response(
+        content=f"Internal Server Error: {str(exc)}",
+        status_code=500
+    )
 
 @app.middleware("http")
 async def audit_middleware(request: Request, call_next):
@@ -52,6 +76,7 @@ async def audit_middleware(request: Request, call_next):
     method = request.method
     path = request.url.path
     
+    print(f"DEBUG: Headers - {request.headers}")
     response = await call_next(request)
     
     # Audit mutations on protected routes

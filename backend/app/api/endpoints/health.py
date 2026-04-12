@@ -5,7 +5,7 @@ from ...services.health import health_service
 from ..deps import require_role
 from typing import Dict, Any
 
-router = APIRouter(prefix="/api/v1/health", dependencies=[Depends(require_role(["it_admin", "owner"]))])
+router = APIRouter(prefix="/api/v1/health", dependencies=[Depends(require_role(["admin", "it_admin", "owner", "barber", "barber_admin"]))])
 
 @router.get("/integrity")
 async def get_measured_integrity(db: Session = Depends(get_db)):

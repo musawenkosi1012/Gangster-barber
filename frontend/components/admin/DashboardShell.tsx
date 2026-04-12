@@ -89,9 +89,9 @@ export const DashboardShell = ({
               <p className="text-[7px] text-white/20 font-bold uppercase tracking-[0.2em] mt-1">Authorized</p>
             </div>
           </div>
-          <SignOutButton>
-            <button className="w-full py-4 rounded-xl bg-white/5 border border-white/5 text-[9px] font-black uppercase tracking-[0.3em] text-white/40 hover:text-red-600 hover:border-red-600/30 transition-all">
-              Terminate Session
+          <SignOutButton redirectUrl="/">
+            <button className="w-full py-4 rounded-xl bg-red-600/5 border border-red-600/10 text-[9px] font-black uppercase tracking-[0.3em] text-red-500/60 hover:bg-red-600 hover:text-white transition-all shadow-lg hover:shadow-red-600/20">
+              LOGOUT / TERMINATE
             </button>
           </SignOutButton>
         </div>
@@ -181,9 +181,9 @@ export const DashboardShell = ({
 
           {/* Divider + Sign out */}
           <div className="px-4 pt-2 pb-6 border-t border-white/5 mt-2">
-            <SignOutButton>
-              <button className="w-full py-4 rounded-2xl bg-red-600/5 border border-red-600/10 text-[10px] font-black uppercase tracking-[0.3em] text-red-500/70 hover:bg-red-600/10 hover:text-red-400 transition-all">
-                Terminate Session
+            <SignOutButton redirectUrl="/">
+              <button className="w-full py-4 rounded-2xl bg-red-600/10 border border-red-600/20 text-[10px] font-black uppercase tracking-[0.3em] text-red-500 hover:bg-red-600 hover:text-white transition-all shadow-lg">
+                LOGOUT / TERMINATE
               </button>
             </SignOutButton>
           </div>

@@ -27,7 +27,7 @@ interface CustomerDetail extends Customer {
 }
 
 export default function CustomersPage() {
-  const { getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
@@ -37,6 +37,8 @@ export default function CustomersPage() {
 
   // --- 🛰️ List Stream ---
   const fetchList = async () => {
+    if (!isLoaded || !isSignedIn) return;
+    
     try {
       const token = await getToken();
       const response = await syndicateFetch(`/api/v1/admin/customers/?search=${search}`, {
@@ -54,6 +56,8 @@ export default function CustomersPage() {
 
   // --- 🛰️ Detail Deep-Dive ---
   const fetchDetail = async (id: number) => {
+    if (!isLoaded || !isSignedIn) return;
+    
     setIsDetailLoading(true);
     try {
       const token = await getToken();
@@ -70,8 +74,13 @@ export default function CustomersPage() {
     }
   };
 
-  useEffect(() => { fetchList(); }, [search, getToken]);
-  useEffect(() => { if (selectedId) fetchDetail(selectedId); }, [selectedId, getToken]);
+  useEffect(() => { 
+    if (isLoaded && isSignedIn) fetchList(); 
+  }, [search, isLoaded, isSignedIn]);
+
+  useEffect(() => { 
+    if (selectedId && isLoaded && isSignedIn) fetchDetail(selectedId); 
+  }, [selectedId, isLoaded, isSignedIn]);
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-200px)] gap-8">

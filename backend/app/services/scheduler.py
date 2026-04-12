@@ -81,8 +81,8 @@ class SchedulerService:
         bookings = db.query(Booking).filter(Booking.booking_date == target_date).all()
         blocks = db.query(BlockedSlot).filter(BlockedSlot.date == target_date).all()
         
-        # Map for O(1) lookups during generation
-        booking_times = {b.slot_time for b in bookings}
+        # Map for O(1) lookups during generation - Ignore CANCELLED/REJECTED to free up slots
+        booking_times = {b.slot_time for b in bookings if b.status not in ["CANCELLED", "REJECTED"]}
         block_map = {bl.slot_time: bl for bl in blocks}
         
         current_time = datetime.combine(target_date, self.START_TIME)

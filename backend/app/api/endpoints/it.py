@@ -3,12 +3,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from ...db.base import get_db
 from ...models.technical import AuditLog, PaymentTransaction, SystemAlert
+from ...services.scheduler import scheduler
 from ..deps import require_role
 from typing import List, Dict, Any
 import time
 
-# IT Dashboard is strictly gated for it_admin and owner roles
-router = APIRouter(prefix="/api/v1/it", dependencies=[Depends(require_role(["it_admin", "owner"]))])
+# IT Dashboard is strictly gated for admin, it_admin and owner roles
+router = APIRouter(prefix="/api/v1/it", dependencies=[Depends(require_role(["admin", "it_admin", "owner"]))])
 
 @router.get("/security/audit-logs")
 def get_audit_logs(

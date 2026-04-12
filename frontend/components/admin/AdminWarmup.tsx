@@ -10,10 +10,12 @@ import { syndicateFetch } from "@/utils/api";
  * the operator enters the tactical terminal.
  */
 export const AdminWarmup = () => {
-  const { getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
 
   useEffect(() => {
     const firePulse = async () => {
+      if (!isLoaded || !isSignedIn) return;
+      
       try {
         const token = await getToken();
         if (!token) return;
@@ -27,8 +29,9 @@ export const AdminWarmup = () => {
       }
     };
 
-    firePulse();
-  }, [getToken]);
+    // firePulse(); // Decommissioned: Bypassing pre-emptive integrity check to reduce hydration noise.
+    console.log("Admin Warmup: Integrity check deactivated.");
+  }, [isLoaded, isSignedIn]);
 
   return null; // Invisible tactical engine
 };

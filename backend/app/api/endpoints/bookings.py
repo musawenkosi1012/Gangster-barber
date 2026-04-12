@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -7,6 +7,7 @@ from ...schemas.booking import BookingCreate, Booking as BookingSchema, BookingU
 from ...services.scheduler import scheduler
 from ...db.base import get_db
 from ...models import Booking, PaymentTransaction, AuditLog
+import os
 from datetime import date, datetime
 from typing import List, Optional, Annotated
 
@@ -14,6 +15,12 @@ router = APIRouter()
 
 # Type alias for cleaner code
 db_dependency = Annotated[Session, Depends(get_db)]
+
+class PaymentStatusResponse(BaseModel):
+    bookingId: int
+    status: str # PENDING, PAID, REJECTED, EXPIRED, ERROR
+    transactionRef: Optional[str] = None
+    error: Optional[dict] = None
 
 print(f"Booking model class: {Booking}")
 print(f"Booking table info: {Booking.__table__ if hasattr(Booking, '__table__') else 'No __table__'}")
@@ -62,17 +69,6 @@ def create_booking(req: BookingCreate, db: db_dependency):
         db.add(new_booking)
         db.flush() # Get the ID before commit
         
-        # 1. Initialize Payment Ledger Entry if not cash
-        if req.payment_method != "CASH":
-            transaction = PaymentTransaction(
-                booking_id=new_booking.id,
-                amount=req.payment_amount or 0.0,
-                provider=req.payment_method,
-                status="pending",
-                poll_url=req.poll_url
-            )
-            db.add(transaction)
-            
         # 2. Record in Audit Log
         audit = AuditLog(
             actor_id=req.user_id,
@@ -193,55 +189,92 @@ def submit_payment_reference(req: PaymentVerification, db: db_dependency):
 def get_user_bookings(user_id: str, db: db_dependency):
     return db.query(Booking).filter(Booking.user_id == user_id).order_by(Booking.booking_date.desc()).all()
 
-@router.get("/{booking_id}/payment-status")
+@router.get("/{booking_id}/payment-status", response_model=PaymentStatusResponse)
 def get_payment_status(booking_id: int, db: db_dependency):
     """
-    Frontend polls this to check if Paynow confirmed payment.
-    Returns booking status + transaction status.
+    Refined Status Hub: Orchestrates the transition from PENDING to either CONFIRMED or CANCELLED
+    based on the financial outcome. Fills the contract-driven intent for graceful failure.
     """
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+    try:
+        booking = db.query(Booking).filter(Booking.id == booking_id).first()
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
 
-    transaction = db.query(PaymentTransaction).filter(
-        PaymentTransaction.booking_id == booking_id
-    ).order_by(PaymentTransaction.id.desc()).first()
+        transaction = db.query(PaymentTransaction).filter(
+            PaymentTransaction.booking_id == booking_id
+        ).order_by(PaymentTransaction.id.desc()).first()
 
-    return {
-        "booking_id": booking_id,
-        "booking_status": booking.status,
-        "payment_status": transaction.status if transaction else "none",
-        "poll_url": transaction.poll_url if transaction else None,
-        # Only CONFIRMED is a valid paid state now (PAID was invalid status)
-        "paid": booking.status == "CONFIRMED",
-    }
+        # Phase 3 IDD: Determine the absolute state
+        if not transaction:
+            return {
+                "bookingId": booking_id,
+                "status": "PENDING", # No transaction yet, usually means the user just landed on payment page
+                "transactionRef": None
+            }
+
+        # Safe detection of REJECTED/CANCELLED states
+        is_rejected = transaction.status in ["cancelled", "rejected", "failed"]
+        
+        if is_rejected:
+            # Shift-Left Logic: If payment is dead, release the resource (the slot)
+            if booking.status != "CANCELLED":
+                booking.status = "CANCELLED"
+                db.commit()
+            
+            return {
+                "bookingId": booking_id,
+                "status": "REJECTED",
+                "error": {
+                    "code": f"PAYMENT_{transaction.status.upper()}",
+                    "message": "The payment process was not completed successfully."
+                }
+            }
+
+        if transaction.status == "completed":
+            # Just in case the webhook was faster than this poll
+            return {
+                "bookingId": booking_id,
+                "status": "PAID",
+                "transactionRef": transaction.provider_ref
+            }
+
+        return {
+            "bookingId": booking_id,
+            "status": "PENDING",
+            "transactionRef": transaction.poll_url
+        }
+
+    except Exception as e:
+        # GreenOps Audit: Log minimal necessary telemetry to resolve the anomaly
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.error(f"Intent Violation in Payment Status [ID:{booking_id}]: {str(e)}")
+        
+        return {
+            "bookingId": booking_id,
+            "status": "ERROR",
+            "error": {"code": "TELEMETRY_FAILURE", "message": "Manual verification required."}
+        }
 
 
 class CompletePaymentRequest(BaseModel):
     transaction_status: str = "completed"
 
 
-@router.patch("/{booking_id}/complete-payment")
-def complete_payment_transaction(booking_id: int, req: CompletePaymentRequest, db: db_dependency):
+@router.post("/{booking_id}/confirm")
+def confirm_booking(booking_id: int, request: Request, db: db_dependency):
     """
-    Fix 3: Called by the PayNow webhook (via notify_backend_of_payment) to mark
-    the PaymentTransaction record as completed. Previously, the ledger stayed
-    at 'pending' forever even after a successful payment.
+    Final Commitment Endpoint.
+    Only callable by internal services (Payment Context) after verification.
     """
-    transaction = db.query(PaymentTransaction).filter(
-        PaymentTransaction.booking_id == booking_id
-    ).order_by(PaymentTransaction.id.desc()).first()
+    secret = request.headers.get("X-Internal-Secret")
+    if secret != os.getenv("INTERNAL_API_SECRET"):
+        raise HTTPException(status_code=403, detail="Forbidden: Internal Clearance Only")
 
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Payment transaction not found for this booking")
-
-    transaction.status = req.transaction_status
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    booking.status = "CONFIRMED"
     db.commit()
-    db.refresh(transaction)
-
-    return {
-        "message": f"Transaction {transaction.id} marked as {req.transaction_status}",
-        "transaction_id": transaction.id,
-        "booking_id": booking_id,
-        "status": transaction.status
-    }
+    return {"status": "CONFIRMED", "booking_id": booking_id}

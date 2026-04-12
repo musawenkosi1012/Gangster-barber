@@ -9,14 +9,19 @@ import { useRouter } from "next/navigation";
 import { BRAND } from "@/utils/constants";
 import Image from "next/image";
 
+interface ServiceImage {
+  id: number;
+  image_path: string;
+}
+
 interface Service {
   id: number;
   name: string;
   slug: string;
   price: number;
   duration_minutes: number;
-  image_url: string | null;
   description: string | null;
+  images: ServiceImage[];
 }
 
 interface Slot {
@@ -211,18 +216,36 @@ const getPaymentButtonStyle = (method: string, selectedMethod: string) => {
   }
 };
 
-const BookingSuccessView = ({ selectedDate, allocatedSlot, timeLeft }: { selectedDate: string, allocatedSlot: string, timeLeft: string }) => (
+const BookingSuccessView = ({ selectedDate, allocatedSlot, timeLeft, images }: { selectedDate: string, allocatedSlot: string, timeLeft: string, images: ServiceImage[] }) => (
   <div className="text-center py-8 relative z-20">
     <div className="w-20 h-20 bg-green-500/10 border border-green-500/20 text-green-500 rounded-2xl flex items-center justify-center mx-auto mb-8 text-3xl rotate-12">✓</div>
-    <h2 className="text-3xl font-black mb-4 tracking-tighter">SUCCESS!</h2>
-    <p className="text-gray-400 mb-6 leading-relaxed">You secured a 40-min slot for {selectedDate} at:<br /><span className="text-white text-6xl font-black tracking-tighter mt-4 block">{allocatedSlot}</span></p>
+    <h2 className="text-2xl font-black mb-4 tracking-tighter uppercase">Slot Secured</h2>
+    <p className="text-white/40 mb-6 text-sm uppercase tracking-widest font-bold">You are confirmed for {selectedDate} at:<br /><span className="text-white text-5xl font-black tracking-tighter mt-4 block">{allocatedSlot}</span></p>
+    
+    {/* 🖼️ Tactical Gallery: High-Fidelity Results View */}
+    {images && images.length > 0 && (
+      <div className="flex gap-4 overflow-x-auto pb-8 mb-8 no-scrollbar -mx-12 px-12">
+        {images.map((img, idx) => (
+          <div key={img.id} className="min-w-[280px] h-48 bg-white/5 rounded-[2rem] border border-white/5 overflow-hidden relative group">
+             <Image 
+               src={img.image_path.startsWith('http') ? img.image_path : `/${img.image_path}`}
+               alt="Gallery Item"
+               fill
+               className="object-cover group-hover:scale-110 transition-transform duration-700"
+             />
+             <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+          </div>
+        ))}
+      </div>
+    )}
+
     <div className="bg-white/5 border border-white/10 rounded-2xl py-4 mb-8">
        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-red-500 mb-1">Time to Target</p>
        <p className="text-3xl font-black tracking-widest text-white tabular-nums">{timeLeft || "..."}</p>
     </div>
     <div className="flex flex-col sm:flex-row gap-4 justify-center">
       <Link href="/dashboard" className="btn-booking py-6 px-12 text-[11px]">Go to Dashboard</Link>
-      <Link href="/" className="py-6 px-12 text-[11px] font-bold tracking-widest uppercase border border-white/10 rounded-full hover:bg-white hover:text-black transition-all duration-500">Home</Link>
+      <Link href="/" className="py-6 px-12 text-[11px] font-bold tracking-widest uppercase border border-white/10 rounded-full hover:bg-white hover:text-black transition-all duration-500 text-white">Home</Link>
     </div>
   </div>
 );
@@ -242,11 +265,19 @@ const ServiceCatalog = ({ services, onSelect, selectedService }: { services: Ser
             selectedService?.id === s.id ? 'border-amber-500 scale-[1.02]' : 'border-white/5 hover:border-white/20'
           }`}
         >
-          <div className="absolute inset-0 bg-white/5">
-            {s.image_url ? (
-              <Image src={s.image_url} alt={s.name} fill className="object-cover group-hover:scale-110 transition-transform duration-1000" />
+          <div className="absolute inset-0 bg-[#050505]">
+            {s.images && s.images.length > 0 ? (
+              <Image 
+                src={s.images[0].image_path.startsWith('http') ? s.images[0].image_path : `/${s.images[0].image_path}`} 
+                alt={s.name} 
+                fill 
+                className="object-cover group-hover:scale-110 transition-transform duration-1000" 
+              />
             ) : (
-              <div className="flex items-center justify-center h-full text-[8px] font-black tracking-widest text-white/10 uppercase italic">Gangster.</div>
+              <div className="flex flex-col items-center justify-center h-full gap-2">
+                <span className="text-[10px] font-black tracking-[0.6em] text-white/5 uppercase italic">Gangster.</span>
+                <span className="text-[6px] font-bold text-red-600/30 uppercase tracking-widest">Portfolio Coming Soon</span>
+              </div>
             )}
             <div className={`absolute inset-0 transition-opacity duration-500 ${selectedService?.id === s.id ? 'bg-amber-900/40' : 'bg-gradient-to-t from-black/90 via-black/40 to-transparent group-hover:from-black/70'}`}></div>
           </div>
@@ -511,7 +542,7 @@ export default function BookPage() {
               </button>
             </div>
           ) : bookingStatus === "success" ? (
-            <BookingSuccessView selectedDate={selectedDate} allocatedSlot={allocatedSlot!} timeLeft={timeLeft} />
+            <BookingSuccessView selectedDate={selectedDate} allocatedSlot={allocatedSlot!} timeLeft={timeLeft} images={selectedService?.images || []} />
           ) : (
             <form onSubmit={handleBooking} className="flex flex-col gap-10">
               <div className="flex flex-col gap-3">

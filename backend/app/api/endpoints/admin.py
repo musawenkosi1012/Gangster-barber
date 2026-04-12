@@ -124,9 +124,13 @@ async def admin_dashboard_bootstrap(
     }
 
 @router.get("/bootstrap")
-def admin_bootstrap_legacy(db: Session = Depends(get_db), current_admin: Dict[str, Any] = Depends(get_current_admin)):
-    """Legacy compatibility bridge."""
-    return admin_dashboard_bootstrap(db, current_admin)
+async def admin_bootstrap_legacy(
+    response: Response,
+    db: Session = Depends(get_db), 
+    current_admin: Dict[str, Any] = Depends(get_current_admin)
+):
+    """Legacy compatibility bridge: Ensures 2025 terminal clients can still hydrate."""
+    return await admin_dashboard_bootstrap(response, db, current_admin)
 
 @router.get("/dashboard/overview")
 def get_dashboard_pulse(db: Session = Depends(get_db)):
@@ -137,9 +141,9 @@ def get_dashboard_pulse(db: Session = Depends(get_db)):
     return {"stats": {"revenue": 0, "completed": len(bookings)}} # Simplified for now
 
 @router.get("/bookings/schedule", response_model=List[BookingSchema])
-def get_flash_schedule(target_date: Optional[date] = None, db: Session = Depends(get_db)):
+def get_flash_schedule(date: Optional[date] = None, db: Session = Depends(get_db)):
     """Chronological stream of today's slots with full customer and status metadata."""
-    date_to_check = target_date or scheduler.get_zimbabwe_now().date()
+    date_to_check = date or scheduler.get_zimbabwe_now().date()
     return db.query(Booking).filter(Booking.booking_date == date_to_check).order_by(Booking.slot_time.asc()).all()
 
 @router.post("/slots/block", response_model=BlockedSlotSchema)

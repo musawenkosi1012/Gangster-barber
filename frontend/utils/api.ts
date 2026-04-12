@@ -37,10 +37,23 @@ export async function syndicateFetch(
       }
     }, timeoutMs);
 
+    // 🛡️ Security Sanity: Prevent malformed auth headers from leaking to the backend
+    if (options.headers) {
+      const headers = options.headers as Record<string, string>;
+      if (headers['Authorization'] === 'Bearer null' || headers['Authorization'] === 'Bearer undefined') {
+        console.warn("[Syndicate] Blocked unauthenticated trial: Token missing on mount.");
+        delete headers['Authorization'];
+      }
+    }
+
     try {
       const response = await fetch(url, {
         ...options,
         signal: controller.signal,
+        headers: {
+          ...options.headers,
+          "X-Syndicate-Platform": "GB-Term-2026",
+        }
       });
 
       clearTimeout(id);
@@ -51,7 +64,17 @@ export async function syndicateFetch(
       }
 
       if (response.status >= 500) {
+        console.error(`[Syndicate] Server Error ${response.status} on ${url}`);
         throw new Error(`Server Error: ${response.status}`);
+      }
+      
+      if (response.status === 401 || response.status === 403) {
+        const detail = await response.clone().json().catch(() => ({}));
+        console.error(`[Syndicate] Identity Failure ${response.status}:`, detail.detail || "Authentication required");
+      }
+      
+      if (response.status >= 400) {
+        console.error(`[Syndicate] Client Error ${response.status} on ${url}`);
       }
 
       if (response.status === 429) {

@@ -4,6 +4,13 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 
 import { DashboardShell } from "@/components/admin/DashboardShell";
+import { Metadata } from "next";
+
+export const metadata: Metadata = {
+  metadataBase: new URL("http://localhost:3005"),
+  title: "Gangster Barber Admin",
+  description: "Tactical Control Terminal for Gangster Barber CRM",
+};
 
 export default async function AdminLayout({
   children,
@@ -12,6 +19,11 @@ export default async function AdminLayout({
 }) {
   const { sessionClaims } = await auth();
   const role = sessionClaims?.metadata?.role || "customer";
+
+  // Security Guard: Prevent unauthorized 'customer' or unauthenticated drift into the terminal zone.
+  if (role === "customer") {
+    redirect("/");
+  }
 
   const navItems = [
     { label: "Schedule", href: "/admin" },

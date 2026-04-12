@@ -13,8 +13,24 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: "GANGSTER | The Syndicate Elite",
-  description: "The Syndicate Pro Series. Surgical grade grooming for the untouchable.",
+  metadataBase: new URL('http://localhost:3005'), // Update to .co.zw for production
+  title: {
+    default: 'Gangster Barber | Best Barber in Gweru, Zimbabwe',
+    template: '%s | Gangster Barber'
+  },
+  description: 'Premium cuts, fades & grooming in Gweru, Zimbabwe (Senga/Nehosho). Online booking available.',
+  keywords: ['barber Gweru', 'Senga barber', 'Nehosho barber', 'fades Zimbabwe'],
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },
@@ -30,7 +46,7 @@ export const metadata: Metadata = {
   manifest: "/site.webmanifest",
   openGraph: {
     title: "GANGSTER BARBER | The Syndicate Elite",
-    description: "The Syndicate Pro Series. Surgical grade grooming for the untouchable.",
+    description: "Premium cuts, fades & grooming in Gweru, Zimbabwe (Senga/Nehosho). Online booking available.",
     images: [{ url: "/logo.png", width: 500, height: 500, alt: "Gangster Barber" }],
     type: "website",
   },
@@ -49,6 +65,7 @@ export const viewport = {
 
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
+import { LocalBusinessSchema } from "@/components/seo/Schema";
 
 export default function RootLayout({
   children,
@@ -91,6 +108,7 @@ export default function RootLayout({
           unsafe_disableDevelopmentModeConsoleWarning
         >
           <div className="grain"></div>
+          <LocalBusinessSchema />
           {children}
         </ClerkProvider>
 

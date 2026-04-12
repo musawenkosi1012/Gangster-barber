@@ -44,40 +44,31 @@ async def verify_request_auth(
 async def notify_backend_of_payment(booking_id: str, status: str):
     """
     Internal bridge to sync payment status with the main core backend.
-    Fix 2: Sets booking status to CONFIRMED (not PAID).
-    Fix 3: Also updates the PaymentTransaction record to 'completed'.
+    Enforces the Contract: Verification must happen before state promotion.
     """
     backend_url = os.getenv("BACKEND_API_URL", "")
+    internal_secret = os.getenv("INTERNAL_API_SECRET", "")
+    
     if not backend_url:
-        logger.error("BACKEND_API_URL not configured — cannot notify backend of payment")
+        logger.error("BACKEND_API_URL not configured")
         return
 
     try:
         async with httpx.AsyncClient() as client:
-            # Update booking status to CONFIRMED (valid status)
-            booking_response = await client.patch(
-                f"{backend_url}/api/book/{booking_id}",
-                json={"status": "CONFIRMED"},
-                timeout=10.0
+            # Shift-Left Security: Use internal secret to authorize state change
+            response = await client.post(
+                f"{backend_url}/api/book/{booking_id}/confirm",
+                headers={"X-Internal-Secret": internal_secret},
+                timeout=15.0
             )
-            if booking_response.status_code == 200:
-                logger.info(f"✅ Booking {booking_id} confirmed.")
+            
+            if response.status_code == 200:
+                logger.info(f"✅ Booking {booking_id} verified and confirmed by Core.")
             else:
-                logger.warning(f"⚠️ Failed to confirm booking {booking_id}. Backend responded {booking_response.status_code}")
-
-            # Also mark the PaymentTransaction as completed (Fix 3)
-            txn_response = await client.patch(
-                f"{backend_url}/api/book/{booking_id}/complete-payment",
-                json={"transaction_status": "completed"},
-                timeout=10.0
-            )
-            if txn_response.status_code == 200:
-                logger.info(f"✅ PaymentTransaction for booking {booking_id} marked completed.")
-            else:
-                logger.warning(f"⚠️ Failed to update transaction for booking {booking_id}. Backend responded {txn_response.status_code}")
+                logger.error(f"❌ Core rejected confirmation for {booking_id}: {response.text}")
 
     except Exception as e:
-        logger.error(f"❌ Backend notification error: {e}")
+        logger.error(f"❌ Backend synchronization failure: {e}")
 
 
 @router.post("/webhook")

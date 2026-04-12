@@ -1,36 +1,47 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { syndicateFetch } from "@/utils/api";
 import Image from "next/image";
+
+interface ServiceImage {
+  id: number;
+  image_path: string;
+  alt_text: string | null;
+}
 
 interface Service {
   id: number;
   name: string;
   price: number;
   duration_minutes: number;
-  image_url: string | null;
+  images: ServiceImage[];
   is_active: boolean;
   sort_order: number;
   description: string | null;
 }
 
 export default function AdminServices() {
-  const { getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
   const [services, setServices] = useState<Service[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [currentService, setCurrentService] = useState<Partial<Service>>({
     name: "",
     price: 0,
     duration_minutes: 40,
     is_active: true,
     sort_order: 0,
-    description: ""
+    description: "",
+    images: []
   });
 
   const fetchServices = async () => {
+    if (!isLoaded || !isSignedIn) return;
+    
     try {
       const token = await getToken();
       const response = await syndicateFetch("/api/v1/admin/services", {
@@ -47,8 +58,8 @@ export default function AdminServices() {
   };
 
   useEffect(() => {
-    fetchServices();
-  }, []);
+    if (isLoaded && isSignedIn) fetchServices();
+  }, [isLoaded, isSignedIn]);
 
   const handleSave = async () => {
     try {
@@ -58,21 +69,57 @@ export default function AdminServices() {
         ? `/api/v1/admin/services/${currentService.id}` 
         : "/api/v1/admin/services";
 
+      const formData = new FormData();
+      
+      // 🛠️ Unify Metadata
+      if (currentService.name) formData.append("name", currentService.name);
+      if (currentService.price !== undefined) formData.append("price", currentService.price.toString());
+      if (currentService.duration_minutes !== undefined) formData.append("duration_minutes", currentService.duration_minutes.toString());
+      if (currentService.description) formData.append("description", currentService.description || "");
+      if (currentService.is_active !== undefined) formData.append("is_active", currentService.is_active.toString());
+      if (currentService.sort_order !== undefined) formData.append("sort_order", currentService.sort_order.toString());
+
+      // 🖼️ Phase 3: Tactical Multi-Asset Ingestion
+      selectedFiles.forEach(file => formData.append("files", file));
+
       const response = await syndicateFetch(url, {
         method,
         headers: { 
-          "Content-Type": "application/json",
           Authorization: `Bearer ${token}` 
         },
-        body: JSON.stringify(currentService)
+        body: formData
       });
 
       if (response.ok) {
         setIsModalOpen(false);
+        setSelectedFiles([]);
         fetchServices();
       }
     } catch (e) {
-      alert("Failed to save service inventory.");
+       console.error("Save failed:", e);
+       alert("Failed to save service inventory.");
+    }
+  };
+
+  const handleDeleteImage = async (imageId: number) => {
+    if (!confirm("Are you sure you want to remove this asset?")) return;
+    try {
+      const token = await getToken();
+      const response = await syndicateFetch(`/api/v1/admin/services/images/${imageId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.ok) {
+        // Optimistic UI: Filter out the image locally
+        if (currentService.images) {
+          setCurrentService({
+            ...currentService,
+            images: currentService.images.filter(img => img.id !== imageId)
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Asset decommission failed:", e);
     }
   };
 
@@ -99,16 +146,19 @@ export default function AdminServices() {
         {services.map((service) => (
           <div key={service.id} className="group relative bg-white/[0.02] border border-white/5 rounded-[2.5rem] overflow-hidden hover:bg-white/[0.04] transition-all">
              <div className="aspect-[16/10] bg-white/5 relative overflow-hidden">
-                {service.image_url ? (
+                {service.images && service.images.length > 0 ? (
                   <Image 
-                    src={service.image_url} 
+                    src={service.images[0].image_path.startsWith('http') ? service.images[0].image_path : `/${service.images[0].image_path}`} 
                     alt={service.name} 
                     fill 
                     className="object-cover group-hover:scale-110 transition-transform duration-700" 
                   />
                 ) : (
-                  <div className="absolute inset-0 flex items-center justify-center p-12">
-                     <p className="text-[10px] font-black uppercase tracking-[0.5em] text-white/5 opacity-40">GANGSTER.</p>
+                  <div className="absolute inset-0 flex items-center justify-center p-12 bg-[#050505]">
+                     <div className="flex flex-col items-center gap-2">
+                        <p className="text-[10px] font-black uppercase tracking-[0.5em] text-white/10 italic">GANGSTER.</p>
+                        <p className="text-[7px] font-bold uppercase tracking-widest text-red-600/20">Awaiting Portfolio Assets</p>
+                     </div>
                   </div>
                 )}
                 {!service.is_active && (
@@ -168,18 +218,74 @@ export default function AdminServices() {
                          className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-xs font-black uppercase tracking-widest outline-none focus:border-red-600 transition-all"
                        />
                     </div>
-                 </div>
+                  </div>
 
-                 <div className="space-y-3">
-                    <label className="text-[9px] font-black uppercase tracking-[0.2em] text-white/20">Image URL (Assets)</label>
-                    <input 
-                      type="text" 
-                      value={currentService.image_url || ""}
-                      onChange={(e) => setCurrentService({ ...currentService, image_url: e.target.value })}
-                      placeholder="https://..."
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-[10px] font-bold text-white/40 outline-none focus:border-red-600 transition-all"
-                    />
-                 </div>
+                  {/* Operational Asset Hub */}
+                  <div className="space-y-4">
+                    <label className="text-[9px] font-black uppercase tracking-[0.2em] text-white/20">Service Assets & Portfolio (Upload Only)</label>
+                    <div className="flex gap-4">
+                      <input 
+                        type="file" 
+                        multiple 
+                        ref={fileInputRef}
+                        onChange={(e) => {
+                          if (e.target.files) setSelectedFiles(Array.from(e.target.files));
+                        }}
+                        className="hidden" 
+                        accept="image/*"
+                      />
+                      
+                      <button 
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-6 py-4 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all group"
+                      >
+                        <span className="text-[10px] font-black uppercase tracking-widest text-white/40 group-hover:text-red-600 transition-colors">
+                          {selectedFiles.length > 0 ? "Change" : "Add Gallery Files"}
+                        </span>
+                      </button>
+                    </div>
+                    
+                    {selectedFiles.length > 0 && (
+                      <div className="flex items-center gap-3 p-4 bg-red-600/10 border border-red-600/20 rounded-2xl animate-in slide-in-from-left-2 duration-300">
+                        <div className="w-1 h-1 rounded-full bg-red-600 animate-pulse" />
+                        <span className="text-[9px] font-black text-red-600 uppercase tracking-[0.2em]">Staged: {selectedFiles.length} New Assets</span>
+                        <button 
+                          onClick={() => setSelectedFiles([])}
+                          className="ml-auto text-[8px] font-black text-white/20 hover:text-white uppercase tracking-widest"
+                        > Clear </button>
+                      </div>
+                    )}
+                    
+                    {/* Strategic Asset Grid: Resilience pattern for multi-asset drift */}
+                    <div className="grid grid-cols-4 gap-3 mt-4">
+                      {currentService.images?.map(img => {
+                        const imgSrc = img.image_path.startsWith('http') 
+                          ? img.image_path 
+                          : `/${img.image_path}`;
+                        
+                        return (
+                          <div key={img.id} className="group/img aspect-square bg-white/5 rounded-xl overflow-hidden border border-white/5 relative">
+                            <Image 
+                              src={imgSrc} 
+                              alt="Gallery Preview" 
+                              width={100} 
+                              height={100} 
+                              className="object-cover w-full h-full"
+                              unoptimized={true}
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => handleDeleteImage(img.id)}
+                              className="absolute top-1 right-1 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity"
+                            >
+                              <span className="text-[10px] text-white">×</span>
+                            </button>
+                          </div>
+                        );
+                      }) || <span className="text-[10px] font-black uppercase tracking-widest text-white/10 italic">No Assets Staging</span>}
+                    </div>
+                  </div>
 
                  <div className="grid grid-cols-2 gap-8">
                     <div className="space-y-3">
