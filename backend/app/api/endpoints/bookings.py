@@ -8,6 +8,7 @@ from ...services.scheduler import scheduler
 from ...db.base import get_db
 from ...models import Booking, PaymentTransaction, AuditLog
 from ..deps import get_current_user
+from ...crud.booking import booking_crud
 import os
 from datetime import date, datetime
 from typing import List, Optional, Annotated
@@ -30,7 +31,7 @@ class PaymentStatusResponse(BaseModel):
     409: {"description": "Double booking detected"},
     500: {"description": "Internal database error"}
 })
-def create_booking(req: BookingCreate, db: db_dependency, user: dict = Depends(get_current_user)):
+def create_booking(req: BookingCreate, db: db_dependency, user: dict = Depends(get_current_user)) -> Booking:
     # Identity Guard: Ensure user can only book for themselves
     if req.user_id != user.get("sub"):
         raise HTTPException(status_code=403, detail="CSRF Violation: Identity mismatch")
@@ -97,8 +98,8 @@ def create_booking(req: BookingCreate, db: db_dependency, user: dict = Depends(g
     400: {"description": "Slot already booked or invalid data"},
     404: {"description": "Booking not found"}
 })
-def update_booking(booking_id: int, req: BookingUpdate, db: db_dependency, user: dict = Depends(get_current_user)):
-    db_booking = db.query(Booking).filter(Booking.id == booking_id).first()
+def update_booking(booking_id: int, req: BookingUpdate, db: db_dependency, user: dict = Depends(get_current_user)) -> Booking:
+    db_booking = booking_crud.get_by_id(db, booking_id)
     if not db_booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
@@ -114,12 +115,7 @@ def update_booking(booking_id: int, req: BookingUpdate, db: db_dependency, user:
     
     if "booking_date" in update_data or "slot_time" in update_data:
         # Check against others (excluding self)
-        conflict = db.query(Booking).filter(
-            Booking.booking_date == new_date,
-            Booking.slot_time == new_time,
-            Booking.id != booking_id
-        ).first()
-        if conflict:
+        if booking_crud.check_conflict(db, new_date, new_time, exclude_id=booking_id):
             raise HTTPException(status_code=400, detail="The new slot is already booked")
 
     for key, value in update_data.items():
@@ -136,8 +132,8 @@ def update_booking(booking_id: int, req: BookingUpdate, db: db_dependency, user:
 @router.delete("/{booking_id}", responses={
     404: {"description": "Booking not found"}
 })
-def delete_booking(booking_id: int, db: db_dependency, user: dict = Depends(get_current_user)):
-    db_booking = db.query(Booking).filter(Booking.id == booking_id).first()
+def delete_booking(booking_id: int, db: db_dependency, user: dict = Depends(get_current_user)) -> dict:
+    db_booking = booking_crud.get_by_id(db, booking_id)
     if not db_booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
@@ -154,30 +150,26 @@ def delete_booking(booking_id: int, db: db_dependency, user: dict = Depends(get_
         raise HTTPException(status_code=500, detail="Decommissioning failed")
 
 @router.get("/slots")
-def get_available_slots(db: db_dependency, date: Optional[date] = None):
+def get_available_slots(db: db_dependency, date: Optional[date] = None) -> List[dict]:
     return scheduler.get_all_slots(db, date)
 
 @router.get("/", response_model=List[BookingSchema])
-def list_bookings(db: db_dependency, booking_date: Optional[date] = None):
-    query = db.query(Booking)
+def list_bookings(db: db_dependency, booking_date: Optional[date] = None) -> List[Booking]:
     if booking_date:
-        query = query.filter(Booking.booking_date == booking_date)
-    return query.order_by(Booking.booking_date.desc()).all()
+        return booking_crud.list_by_date(db, str(booking_date))
+    return db.query(Booking).order_by(Booking.booking_date.desc()).all()
 
 class PaymentVerification(BaseModel):
     booking_id: int
     provider_ref: str
 
 @router.post("/verify-payment")
-def submit_payment_reference(req: PaymentVerification, db: db_dependency):
+def submit_payment_reference(req: PaymentVerification, db: db_dependency) -> dict:
     """
     Allows the customer to submit an EcoCash/OneMoney reference code.
     Flags the transaction for manual review in the IT Command Center.
     """
-    transaction = db.query(PaymentTransaction).filter(
-        PaymentTransaction.booking_id == req.booking_id,
-        PaymentTransaction.status == "pending"
-    ).first()
+    transaction = booking_crud.get_pending_transaction(db, req.booking_id)
     
     if not transaction:
         raise HTTPException(status_code=404, detail="Pending transaction not found for this booking")
@@ -187,7 +179,7 @@ def submit_payment_reference(req: PaymentVerification, db: db_dependency):
     transaction.status = "manual_review"
     
     # Update booking status
-    booking = db.query(Booking).filter(Booking.id == req.booking_id).first()
+    booking = booking_crud.get_by_id(db, req.booking_id)
     if booking:
         booking.status = "VERIFYING"
     
@@ -208,26 +200,24 @@ def submit_payment_reference(req: PaymentVerification, db: db_dependency):
         raise HTTPException(status_code=500, detail="Financial registry update failed")
 
 @router.get("/user/{user_id}", response_model=List[BookingSchema])
-def get_user_bookings(user_id: str, db: db_dependency, user: dict = Depends(get_current_user)):
+def get_user_bookings(user_id: str, db: db_dependency, user: dict = Depends(get_current_user)) -> List[Booking]:
     # Privacy Guard
     if user_id != user.get("sub") and user.get("metadata", {}).get("role") not in ["admin", "owner"]:
         raise HTTPException(status_code=403, detail="Personal data isolation violation")
-    return db.query(Booking).filter(Booking.user_id == user_id).order_by(Booking.booking_date.desc()).all()
+    return booking_crud.list_by_user(db, user_id)
 
 @router.get("/{booking_id}/payment-status", response_model=PaymentStatusResponse)
-def get_payment_status(booking_id: int, db: db_dependency):
+def get_payment_status(booking_id: int, db: db_dependency) -> dict:
     """
     Refined Status Hub: Orchestrates the transition from PENDING to either CONFIRMED or CANCELLED
     based on the financial outcome. Fills the contract-driven intent for graceful failure.
     """
     try:
-        booking = db.query(Booking).filter(Booking.id == booking_id).first()
+        booking = booking_crud.get_by_id(db, booking_id)
         if not booking:
             raise HTTPException(status_code=404, detail="Booking not found")
 
-        transaction = db.query(PaymentTransaction).filter(
-            PaymentTransaction.booking_id == booking_id
-        ).order_by(PaymentTransaction.id.desc()).first()
+        transaction = booking_crud.get_latest_transaction(db, booking_id)
 
         # Phase 3 IDD: Determine the absolute state
         if not transaction:
@@ -287,7 +277,7 @@ class CompletePaymentRequest(BaseModel):
 
 
 @router.post("/{booking_id}/confirm")
-def confirm_booking(booking_id: int, request: Request, db: db_dependency):
+def confirm_booking(booking_id: int, request: Request, db: db_dependency) -> dict:
     """
     Final Commitment Endpoint.
     Only callable by internal services (Payment Context) after verification.
@@ -296,7 +286,7 @@ def confirm_booking(booking_id: int, request: Request, db: db_dependency):
     if secret != os.getenv("INTERNAL_API_SECRET"):
         raise HTTPException(status_code=403, detail="Forbidden: Internal Clearance Only")
 
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = booking_crud.get_by_id(db, booking_id)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     

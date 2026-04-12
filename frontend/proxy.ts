@@ -18,14 +18,16 @@ const isAdminRoute = createRouteMatcher(['/admin(.*)']);
 const isITRoute = createRouteMatcher(['/it(.*)']);
 const isBookRoute = createRouteMatcher(['/book(.*)']);
 
+type GB_Role = 'admin' | 'barber' | 'barber_admin' | 'owner' | 'it_admin' | 'customer';
+
+function getClerkRole(sessionClaims: any): GB_Role {
+  const metadata = sessionClaims?.metadata || sessionClaims?.publicMetadata || sessionClaims?.public_metadata || {};
+  return (metadata.role as GB_Role) || 'customer';
+}
+
 export default clerkMiddleware(async (auth, request) => {
   const { sessionClaims, userId } = await auth();
-
-  const role =
-    (sessionClaims?.metadata as any)?.role ||
-    (sessionClaims?.publicMetadata as any)?.role ||
-    (sessionClaims?.public_metadata as any)?.role ||
-    'customer';
+  const role = getClerkRole(sessionClaims);
 
   const path = request.nextUrl.pathname;
 
