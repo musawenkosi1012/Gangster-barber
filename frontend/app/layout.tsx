@@ -12,14 +12,40 @@ const playfair = Playfair_Display({
   variable: "--font-playfair",
 });
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://gangsterbarber.com';
+
 export const metadata: Metadata = {
-  metadataBase: new URL('http://localhost:3005'), // Update to .co.zw for production
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: 'Gangster Barber | Best Barber in Gweru, Zimbabwe',
-    template: '%s | Gangster Barber'
+    default: 'Gangster Barber | #1 Barbershop in Gweru, Zimbabwe',
+    template: '%s | Gangster Barber Gweru'
   },
-  description: 'Premium cuts, fades & grooming in Gweru, Zimbabwe (Senga/Nehosho). Online booking available.',
-  keywords: ['barber Gweru', 'Senga barber', 'Nehosho barber', 'fades Zimbabwe'],
+  description: 'Gangster Barber — Gweru\'s top barbershop in Senga. Precision fades, tapers, lineups & beard sculpts. Walk-ins welcome. Book online. Serving Gweru, Senga, Nehosho & Midlands Province.',
+  keywords: [
+    'barber Gweru',
+    'barbershop Gweru Zimbabwe',
+    'haircut Gweru',
+    'fade haircut Gweru',
+    'taper fade Gweru',
+    'lineup barber Gweru',
+    'beard trim Gweru',
+    'Senga barber',
+    'Senga Gweru barbershop',
+    'Nehosho barber',
+    'best barber in Gweru',
+    'barber near me Gweru',
+    'cheap haircut Gweru',
+    'Gangster Barber Gweru',
+    'Midlands barber Zimbabwe',
+    'fades Zimbabwe',
+    'barber Zimbabwe',
+    'hair salon Gweru',
+    'men haircut Gweru',
+    'low fade Gweru',
+    'skin fade Gweru',
+  ],
+  authors: [{ name: 'Gangster Barber', url: SITE_URL }],
+  category: 'barbershop',
   robots: {
     index: true,
     follow: true,
@@ -44,17 +70,23 @@ export const metadata: Metadata = {
     ],
   },
   manifest: "/site.webmanifest",
+  alternates: {
+    canonical: SITE_URL,
+  },
   openGraph: {
-    title: "GANGSTER BARBER | The Syndicate Elite",
-    description: "Premium cuts, fades & grooming in Gweru, Zimbabwe (Senga/Nehosho). Online booking available.",
-    images: [{ url: "/logo.png", width: 500, height: 500, alt: "Gangster Barber" }],
-    type: "website",
+    title: 'Gangster Barber | #1 Barbershop in Gweru, Zimbabwe',
+    description: 'Precision fades, tapers, lineups & beard sculpts in Senga, Gweru. Walk-ins welcome. Book your session online.',
+    url: SITE_URL,
+    siteName: 'Gangster Barber',
+    locale: 'en_ZW',
+    type: 'website',
+    images: [{ url: '/logo.png', width: 500, height: 500, alt: 'Gangster Barber — Gweru\'s Top Barbershop' }],
   },
   twitter: {
-    card: "summary",
-    title: "GANGSTER BARBER",
-    description: "Surgical grade grooming for the untouchable.",
-    images: ["/logo.png"],
+    card: 'summary_large_image',
+    title: 'Gangster Barber | Gweru\'s #1 Barbershop',
+    description: 'Precision fades, tapers & grooming in Senga, Gweru, Zimbabwe. Book online.',
+    images: ['/logo.png'],
   },
 };
 
