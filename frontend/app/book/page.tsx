@@ -172,25 +172,6 @@ const checkActiveBookingUser = async (user: any, setSelectedDate: any, setAlloca
   }
 };
 
-  const fetchAvailableSlots = useCallback(async (date: string) => {
-    setIsSlotsLoading(true);
-    setSlotsError(false);
-    try {
-      const response = await syndicateFetch(`/api/book/slots?date=${date}`);
-      if (!response.ok) {
-        setSlotsError(true);
-        return;
-      }
-      const data = await response.json();
-      setAvailableSlots(data);
-    } catch (err) {
-      console.error("Syndicate Slot Fetch Failed:", err);
-      setSlotsError(true);
-    } finally {
-      setIsSlotsLoading(false);
-    }
-  }, []);
-
 const startTimerInterval = (selectedDate: string, allocatedSlot: string, setTimeLeft: any) => {
   const updateTimer = () => {
     try {
@@ -396,6 +377,25 @@ export default function BookPage() {
       checkActiveBookingUser(user, setSelectedDate, setAllocatedSlot, setBookingStatus);
     }
   }, [user]);
+
+  const fetchAvailableSlots = useCallback(async (date: string) => {
+    setIsSlotsLoading(true);
+    setSlotsError(false);
+    try {
+      const response = await syndicateFetch(`/api/book/slots?date=${date}`);
+      if (!response.ok) {
+        setSlotsError(true);
+        return;
+      }
+      const data = await response.json();
+      setAvailableSlots(data);
+    } catch (err) {
+      console.error("Syndicate Slot Fetch Failed:", err);
+      setSlotsError(true);
+    } finally {
+      setIsSlotsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchAvailableSlots(selectedDate);
