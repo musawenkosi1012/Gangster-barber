@@ -88,8 +88,12 @@ async def create_service_unified(
                 image_url = await storage_service.upload_file(file, folder=f"services/{db_service.id}")
                 db.add(ServiceImageModel(image_path=image_url, service_id=db_service.id))
 
-        db.commit()
-        db.refresh(db_service)
+        try:
+            db.commit()
+            db.refresh(db_service)
+        except Exception:
+            db.rollback()
+            raise
         return db_service
     except SQLAlchemyError as e:
         db.rollback()
@@ -141,8 +145,12 @@ async def update_service_unified(
                 image_url = await storage_service.upload_file(file, folder=f"services/{service_id}")
                 db.add(ServiceImageModel(image_path=image_url, service_id=service_id))
 
-        db.commit()
-        db.refresh(db_service)
+        try:
+            db.commit()
+            db.refresh(db_service)
+        except Exception:
+            db.rollback()
+            raise
         return db_service
     except SQLAlchemyError as e:
         db.rollback()
@@ -182,7 +190,11 @@ async def upload_multiple_service_images(
             db.add(new_image)
             saved_images.append(new_image)
             
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
         return {
             "status": "success", 
             "images_uploaded": len(saved_images),

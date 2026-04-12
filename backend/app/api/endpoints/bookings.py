@@ -85,8 +85,12 @@ def create_booking(req: BookingCreate, db: db_dependency, request: Request, user
         )
         db.add(audit)
 
-        db.commit()
-        db.refresh(new_booking)
+        try:
+            db.commit()
+            db.refresh(new_booking)
+        except Exception:
+            db.rollback()
+            raise
         return new_booking
     except IntegrityError:
         db.rollback()
@@ -236,7 +240,11 @@ def get_payment_status(booking_id: int, db: db_dependency) -> dict:
             # Shift-Left Logic: If payment is dead, release the resource (the slot)
             if booking.status != "CANCELLED":
                 booking.status = "CANCELLED"
-                db.commit()
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    raise
             
             return {
                 "bookingId": booking_id,

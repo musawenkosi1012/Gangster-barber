@@ -1,5 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
+import logging
+
+logger = logging.getLogger("audit")
+logging.basicConfig(level=logging.INFO)
 from fastapi.middleware.cors import CORSMiddleware
 from .api.endpoints.bookings import router as bookings_router
 from .api.endpoints.admin import router as admin_router
@@ -80,7 +84,7 @@ async def audit_middleware(request: Request, call_next):
     path = request.url.path
     
     # Sanitize Audit: Don't leak credentials in logs
-    print(f"REQUEST AUDIT: {method} {path} - Host: {request.headers.get('host')}")
+    logger.info(f"REQUEST AUDIT: {method} {path} - Host: {request.headers.get('host')}")
     response = await call_next(request)
     
     # Audit mutations on protected routes
