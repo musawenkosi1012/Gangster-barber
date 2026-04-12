@@ -172,24 +172,6 @@ const checkActiveBookingUser = async (user: any, setSelectedDate: any, setAlloca
   }
 };
 
-  const fetchAvailableSlots = useCallback(async (date: string) => {
-    setIsSlotsLoading(true);
-    setSlotsError(false);
-    try {
-      const response = await syndicateFetch(`/api/book/slots?date=${date}`);
-      if (!response.ok) {
-        setSlotsError(true);
-        return;
-      }
-      const data = await response.json();
-      setAvailableSlots(data);
-    } catch (err) {
-      console.error("Syndicate Slot Fetch Failed:", err);
-      setSlotsError(true);
-    } finally {
-      setIsSlotsLoading(false);
-    }
-  }, []);
 
 const startTimerInterval = (selectedDate: string, allocatedSlot: string, setTimeLeft: any) => {
   const updateTimer = () => {
@@ -354,7 +336,26 @@ export default function BookPage() {
   const [timeLeft, setTimeLeft] = useState<string>("");
   const [isSlotsLoading, setIsSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState(false);
-  const [formData, setFormData] = useState({ name: "", service: "" });
+  const [formData, setFormData] = useState<BookingFormData>({ name: "", service: "", phone: "", date: "", time: "" });
+
+  const fetchAvailableSlots = useCallback(async (date: string) => {
+    setIsSlotsLoading(true);
+    setSlotsError(false);
+    try {
+      const response = await syndicateFetch(`/api/book/slots?date=${date}`);
+      if (!response.ok) {
+        setSlotsError(true);
+        return;
+      }
+      const data = await response.json();
+      setAvailableSlots(data);
+    } catch (err) {
+      console.error("Syndicate Slot Fetch Failed:", err);
+      setSlotsError(true);
+    } finally {
+      setIsSlotsLoading(false);
+    }
+  }, [setIsSlotsLoading, setSlotsError, setAvailableSlots]);
   const [payForCut, setPayForCut] = useState(false);
   const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
   const [paymentPollUrl, setPaymentPollUrl] = useState<string | null>(null);

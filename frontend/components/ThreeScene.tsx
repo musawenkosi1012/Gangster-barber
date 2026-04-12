@@ -171,7 +171,7 @@ export default function ThreeScene() {
     });
     
     // ─── Shader Precision Guard (Fix X4122 Warning) ───
-    const injectPrecision = (shader: THREE.Shader) => {
+    const injectPrecision = (shader: { fragmentShader: string; vertexShader: string }) => {
       shader.fragmentShader = `
         #ifdef GL_FRAGMENT_PRECISION_HIGH
         precision highp float;

@@ -91,8 +91,8 @@ export async function syndicateFetch(
       const isRetryable = error.name === "AbortError" && 
         ((error as any).cause === "TIMEOUT_EXCEEDED" || (error as any).reason === "TIMEOUT_EXCEEDED");
       
-      if (!isRetryable && err.message !== "RETRYABLE_TIMEOUT") {
-        throw err;
+      if (!isRetryable && error.message !== "RETRYABLE_TIMEOUT") {
+        throw error;
       }
 
       console.warn(`[Syndicate] Latency spike on attempt ${i + 1}/${retries}. Retrying...`);
