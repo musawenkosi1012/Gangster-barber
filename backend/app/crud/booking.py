@@ -66,6 +66,20 @@ class BookingRepository:
         return audit
 
     @staticmethod
+    def list_by_name(db: Session, name: str) -> List[Booking]:
+        return db.query(Booking).filter(
+            Booking.name == name
+        ).order_by(Booking.booking_date.desc()).all()
+
+    @staticmethod
+    def get_transaction_by_id(db: Session, tx_id: int) -> Optional[PaymentTransaction]:
+        return db.query(PaymentTransaction).filter(PaymentTransaction.id == tx_id).first()
+
+    @staticmethod
+    def list_all(db: Session) -> List[Booking]:
+        return db.query(Booking).order_by(Booking.booking_date.desc()).all()
+
+    @staticmethod
     def get_pending_transaction(db: Session, booking_id: int) -> Optional[PaymentTransaction]:
         return db.query(PaymentTransaction).filter(
             PaymentTransaction.booking_id == booking_id,

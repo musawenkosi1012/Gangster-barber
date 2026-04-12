@@ -4,10 +4,23 @@ import React, { useEffect, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { syndicateFetch } from "@/utils/api";
 
+interface HealthStatus {
+  database_latency_ms: number;
+  status: string;
+  recent_critical_alerts: number;
+}
+
+interface AuditLog {
+  id: number;
+  action: string;
+  actor_id: string;
+  timestamp: string;
+}
+
 export default function ITDashboard() {
   const { getToken } = useAuth();
-  const [health, setHealth] = useState<any>(null);
-  const [logs, setLogs] = useState<any[]>([]);
+  const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [logs, setLogs] = useState<AuditLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {

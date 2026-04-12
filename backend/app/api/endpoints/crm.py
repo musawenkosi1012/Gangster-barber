@@ -41,9 +41,7 @@ def get_customer_detail(
     if customer.clerk_id:
         history = booking_crud.list_by_user(db, customer.clerk_id)
     elif customer.full_name:
-        history = db.query(BookingModel).filter(
-            BookingModel.name == customer.full_name
-        ).order_by(BookingModel.booking_date.desc()).all()
+        history = booking_crud.list_by_name(db, customer.full_name)
 
     # Intelligence: Reliability Math
     reliability = 100.0

@@ -30,6 +30,24 @@ interface Slot {
   available: boolean;
 }
 
+interface Booking {
+  id?: number;
+  booking_date?: string;
+  date?: string;
+  slot_time: string;
+  status?: string;
+  name?: string;
+  service?: string;
+}
+
+interface BookingFormData {
+  name: string;
+  phone: string;
+  service: string;
+  date: string;
+  time: string;
+}
+
 type SlotStatus = 'available' | 'booked' | 'passed' | 'selected';
 
 const BOOKING_DEPOSIT = BRAND.financials.bookingFee;
@@ -60,7 +78,7 @@ const parseSlotToDate = (dateStr: string, slotStr: string): Date => {
   return target;
 };
 
-const isFutureBooking = (b: any): boolean => {
+const isFutureBooking = (b: Booking): boolean => {
   const bDate = b.booking_date || b.date;
   if (!bDate) return false;
   try {
@@ -87,10 +105,17 @@ const calculateTimeDifference = (targetDate: Date): string => {
   return `${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
 };
 
-const buildPaymentPayload = (method: string, paynowRef: string, formData: any, user: any, phoneNumber: string, amount: number) => {
-  const email = user?.primaryEmailAddress?.emailAddress || "guest@gangster.com";
-  const payload: any = {
-    booking_id: paynowRef,  // Use UUID reference instead of 0 — booking doesn't exist yet
+const buildPaymentPayload = (
+  method: string, 
+  paynowRef: string, 
+  formData: BookingFormData, 
+  user: any, // Clerk User object is complex, but better to use its type if available. For now leaving any if it's very huge
+  phoneNumber: string, 
+  amount: number
+) => {
+  const email = (user as any)?.primaryEmailAddress?.emailAddress || "guest@gangster.com";
+  const payload: Record<string, any> = {
+    booking_id: paynowRef,
     customer_name: formData.name,
     customer_email: email,
     service: formData.service,

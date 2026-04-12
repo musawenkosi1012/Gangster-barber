@@ -64,12 +64,12 @@ async def create_service_unified(
         raise HTTPException(status_code=400, detail="Service exists")
 
     try:
-        db_service = ServiceModel(
+        db_service = service_crud.create_service(
+            db,
             name=name, price=price, duration_minutes=duration_minutes,
             description=description, is_active=is_active, sort_order=sort_order,
             category=category, slug=slug
         )
-        db.add(db_service)
         db.flush() # Get ID for assets
 
         # Image Processing logic (Atomic via Storage Service)
@@ -85,7 +85,7 @@ async def create_service_unified(
                 
                 # Cloud Migration: Atomic Transfer to remote storage
                 image_url = await storage_service.upload_file(file, folder=f"services/{db_service.id}")
-                db.add(ServiceImageModel(image_path=image_url, service_id=db_service.id))
+                service_crud.create_image(db, image_path=image_url, service_id=db_service.id)
 
         try:
             db.commit()
@@ -142,7 +142,7 @@ async def update_service_unified(
                     continue
                 
                 image_url = await storage_service.upload_file(file, folder=f"services/{service_id}")
-                db.add(ServiceImageModel(image_path=image_url, service_id=service_id))
+                service_crud.create_image(db, image_path=image_url, service_id=service_id)
 
         try:
             db.commit()
@@ -185,8 +185,7 @@ async def upload_multiple_service_images(
                 raise HTTPException(status_code=413, detail=f"Oversized asset detected: {file.filename}")
                 
             image_url = await storage_service.upload_file(file, folder=f"services/{service_id}")
-            new_image = ServiceImageModel(image_path=image_url, service_id=service_id)
-            db.add(new_image)
+            new_image = service_crud.create_image(db, image_path=image_url, service_id=service_id)
             saved_images.append(new_image)
             
         try:
@@ -214,7 +213,7 @@ def delete_service_image(image_id: int, db: Session = Depends(get_db)) -> Dict[s
         return {"status": "error", "message": "Asset not found"} # Silent fail for idempotent logic
     
     try:
-        db.delete(img)
+        service_crud.delete_image(db, img)
         db.commit()
         return {"status": "success", "message": "Asset decommissioned"}
     except SQLAlchemyError:

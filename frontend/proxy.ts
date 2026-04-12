@@ -20,7 +20,19 @@ const isBookRoute = createRouteMatcher(['/book(.*)']);
 
 type GB_Role = 'admin' | 'barber' | 'barber_admin' | 'owner' | 'it_admin' | 'customer';
 
-function getClerkRole(sessionClaims: any): GB_Role {
+interface ClerkSessionClaims {
+  metadata?: {
+    role?: GB_Role;
+  };
+  publicMetadata?: {
+    role?: GB_Role;
+  };
+  public_metadata?: {
+    role?: GB_Role;
+  };
+}
+
+function getClerkRole(sessionClaims: ClerkSessionClaims | null): GB_Role {
   const metadata = sessionClaims?.metadata || sessionClaims?.publicMetadata || sessionClaims?.public_metadata || {};
   return (metadata.role as GB_Role) || 'customer';
 }

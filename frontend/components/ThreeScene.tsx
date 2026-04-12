@@ -171,7 +171,7 @@ export default function ThreeScene() {
     });
     
     // ─── Shader Precision Guard (Fix X4122 Warning) ───
-    const injectPrecision = (shader: any) => {
+    const injectPrecision = (shader: THREE.Shader) => {
       shader.fragmentShader = `
         #ifdef GL_FRAGMENT_PRECISION_HIGH
         precision highp float;
@@ -267,7 +267,7 @@ export default function ThreeScene() {
       heroIntensity: 0, redIntensity: 2,
     };
 
-    lenis.on('scroll', (e: any) => {
+    lenis.on('scroll', (e: { progress: number }) => {
       targetProgress = e.progress;
     });
 
@@ -349,7 +349,7 @@ export default function ThreeScene() {
     animate();
     
     // --- Fail-Safes & Debugging ---
-    const handleContextLost = (e: any) => {
+    const handleContextLost = (e: Event) => {
       e.preventDefault();
       console.warn("WebGL Context Lost on mobile. Attempting cleanup.");
       cancelAnimationFrame(animId);

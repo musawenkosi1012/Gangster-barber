@@ -187,7 +187,7 @@ def get_admin_ledger(status: Optional[str] = None, search: Optional[str] = None,
 @router.post("/ledger/{tx_id}/match")
 def match_transaction(tx_id: int, booking_id: int, db: Session = Depends(get_db), current_admin: Dict[str, Any] = Depends(get_current_admin)) -> Dict[str, str]:
     """Manual Reconciliation: Links a floating transaction to a specific customer booking."""
-    tx = db.query(PaymentTransaction).filter(PaymentTransaction.id == tx_id).first()
+    tx = booking_crud.get_transaction_by_id(db, tx_id)
     booking = booking_crud.get_by_id(db, booking_id)
     
     if not tx or not booking:

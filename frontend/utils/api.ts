@@ -21,7 +21,7 @@ export async function syndicateFetch(
     ? endpoint
     : `${pathSeparator}${endpoint}`;
 
-  let lastError: any;
+  let lastError: Error | null = null;
 
   // 12s standard, 20s cold-start first attempt
   const timeoutMs = isWarm ? 12000 : 20000;
@@ -82,12 +82,14 @@ export async function syndicateFetch(
       // If it's a 408 (simulated by fetch timeout or actual status)
       throw new Error("RETRYABLE_TIMEOUT");
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       clearTimeout(id);
-      lastError = err;
+      const error = err as Error;
+      lastError = error;
 
       // Deterministic Exit: Only retry on TIMEOUT_EXCEEDED (408 logic)
-      const isRetryable = err.name === "AbortError" && (err.cause === "TIMEOUT_EXCEEDED" || (err as any).reason === "TIMEOUT_EXCEEDED");
+      const isRetryable = error.name === "AbortError" && 
+        ((error as any).cause === "TIMEOUT_EXCEEDED" || (error as any).reason === "TIMEOUT_EXCEEDED");
       
       if (!isRetryable && err.message !== "RETRYABLE_TIMEOUT") {
         throw err;
@@ -101,5 +103,5 @@ export async function syndicateFetch(
     }
   }
 
-  throw lastError;
+  throw lastError || new Error("Unknown Syndicate Failure");
 }

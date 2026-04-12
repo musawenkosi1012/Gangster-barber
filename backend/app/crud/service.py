@@ -27,4 +27,20 @@ class ServiceRepository:
     def get_image_by_id(db: Session, image_id: int) -> Optional[ServiceImage]:
         return db.query(ServiceImage).filter(ServiceImage.id == image_id).first()
 
+    @staticmethod
+    def create_service(db: Session, **data) -> Service:
+        service = Service(**data)
+        db.add(service)
+        return service
+
+    @staticmethod
+    def create_image(db: Session, image_path: str, service_id: int) -> ServiceImage:
+        image = ServiceImage(image_path=image_path, service_id=service_id)
+        db.add(image)
+        return image
+
+    @staticmethod
+    def delete_image(db: Session, image: ServiceImage) -> None:
+        db.delete(image)
+
 service_crud = ServiceRepository()
