@@ -7,6 +7,7 @@ from ...schemas.booking import BookingCreate, Booking as BookingSchema, BookingU
 from ...services.scheduler import scheduler
 from ...db.base import get_db
 from ...models import Booking, PaymentTransaction, AuditLog
+from ..deps import get_current_user
 import os
 from datetime import date, datetime
 from typing import List, Optional, Annotated
@@ -22,15 +23,17 @@ class PaymentStatusResponse(BaseModel):
     transactionRef: Optional[str] = None
     error: Optional[dict] = None
 
-print(f"Booking model class: {Booking}")
-print(f"Booking table info: {Booking.__table__ if hasattr(Booking, '__table__') else 'No __table__'}")
+
 
 @router.post("/", response_model=BookingSchema, responses={
     400: {"description": "Requested slot is not available or date is in the past"},
     409: {"description": "Double booking detected"},
     500: {"description": "Internal database error"}
 })
-def create_booking(req: BookingCreate, db: db_dependency):
+def create_booking(req: BookingCreate, db: db_dependency, user: dict = Depends(get_current_user)):
+    # Identity Guard: Ensure user can only book for themselves
+    if req.user_id != user.get("sub"):
+        raise HTTPException(status_code=403, detail="CSRF Violation: Identity mismatch")
     zims_now = scheduler.get_zimbabwe_now()
     target_date = req.booking_date or zims_now.date()
     
@@ -94,10 +97,14 @@ def create_booking(req: BookingCreate, db: db_dependency):
     400: {"description": "Slot already booked or invalid data"},
     404: {"description": "Booking not found"}
 })
-def update_booking(booking_id: int, req: BookingUpdate, db: db_dependency):
+def update_booking(booking_id: int, req: BookingUpdate, db: db_dependency, user: dict = Depends(get_current_user)):
     db_booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not db_booking:
         raise HTTPException(status_code=404, detail="Booking not found")
+    
+    # Ownership Shield: Prevent unauthorized mutations
+    if db_booking.user_id != user.get("sub") and user.get("metadata", {}).get("role") not in ["admin", "owner"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Resource ownership mismatch")
     
     update_data = req.model_dump(exclude_unset=True)
     
@@ -118,21 +125,33 @@ def update_booking(booking_id: int, req: BookingUpdate, db: db_dependency):
     for key, value in update_data.items():
         setattr(db_booking, key, value)
     
-    db.commit()
-    db.refresh(db_booking)
-    return db_booking
+    try:
+        db.commit()
+        db.refresh(db_booking)
+        return db_booking
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Safe-Commit Failure: Logic state inconsistent")
 
 @router.delete("/{booking_id}", responses={
     404: {"description": "Booking not found"}
 })
-def delete_booking(booking_id: int, db: db_dependency):
+def delete_booking(booking_id: int, db: db_dependency, user: dict = Depends(get_current_user)):
     db_booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not db_booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
-    db.delete(db_booking)
-    db.commit()
-    return {"message": "Booking cancelled successfully"}
+    # Ownership Shield
+    if db_booking.user_id != user.get("sub") and user.get("metadata", {}).get("role") not in ["admin", "owner"]:
+        raise HTTPException(status_code=403, detail="Resource protection violation")
+
+    try:
+        db.delete(db_booking)
+        db.commit()
+        return {"message": "Booking cancelled successfully"}
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Decommissioning failed")
 
 @router.get("/slots")
 def get_available_slots(db: db_dependency, date: Optional[date] = None):
@@ -180,13 +199,19 @@ def submit_payment_reference(req: PaymentVerification, db: db_dependency):
         resource_id=str(req.booking_id),
         metadata_json={"ref": req.provider_ref}
     )
-    db.add(audit)
-    
-    db.commit()
-    return {"message": "Reference submitted. Verification in progress."}
+    try:
+        db.add(audit)
+        db.commit()
+        return {"message": "Reference submitted. Verification in progress."}
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Financial registry update failed")
 
 @router.get("/user/{user_id}", response_model=List[BookingSchema])
-def get_user_bookings(user_id: str, db: db_dependency):
+def get_user_bookings(user_id: str, db: db_dependency, user: dict = Depends(get_current_user)):
+    # Privacy Guard
+    if user_id != user.get("sub") and user.get("metadata", {}).get("role") not in ["admin", "owner"]:
+        raise HTTPException(status_code=403, detail="Personal data isolation violation")
     return db.query(Booking).filter(Booking.user_id == user_id).order_by(Booking.booking_date.desc()).all()
 
 @router.get("/{booking_id}/payment-status", response_model=PaymentStatusResponse)
@@ -275,6 +300,10 @@ def confirm_booking(booking_id: int, request: Request, db: db_dependency):
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
-    booking.status = "CONFIRMED"
-    db.commit()
-    return {"status": "CONFIRMED", "booking_id": booking_id}
+    try:
+        booking.status = "CONFIRMED"
+        db.commit()
+        return {"status": "CONFIRMED", "booking_id": booking_id}
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Final commitment state transition failed")

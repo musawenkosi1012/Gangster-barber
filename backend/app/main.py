@@ -17,9 +17,8 @@ import sys
 async def lifespan(app: FastAPI):
     # Initialize DB on first real request, not at import time
     try:
-        print(f"DATABASE_URL being used: {settings.DATABASE_URL}")
         init_db()
-        print("init_db done")
+        print("init_db completed successfully")
     except Exception as e:
         print(f"WARNING: init_db failed: {e}")
     yield

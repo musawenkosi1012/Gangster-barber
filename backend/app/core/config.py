@@ -37,6 +37,11 @@ class Settings(BaseSettings):
         password = urllib.parse.quote_plus(self.DB_PASS)
         return f"postgresql+psycopg2://{user}:{password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?sslmode=require"
 
+    # Cloud Storage (April 2026 Audit Requirement)
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "https://luseceypnzarplfnxekj.supabase.co")
+    SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
+    CLOUDINARY_URL: str = os.getenv("CLOUDINARY_URL", "")
+
     # CORS Config
     ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3005,https://gangster-barber-frontend.vercel.app,https://gangster-barber.vercel.app,https://gangster-barber-paynow.vercel.app")
 

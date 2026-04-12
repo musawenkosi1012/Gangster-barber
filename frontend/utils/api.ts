@@ -63,48 +63,38 @@ export async function syndicateFetch(
         return response;
       }
 
+      // 🛡️ Log Sanitization: Hiding granular details in production-ready logs
       if (response.status >= 500) {
-        console.error(`[Syndicate] Server Error ${response.status} on ${url}`);
-        throw new Error(`Server Error: ${response.status}`);
+        console.error(`[Syndicate] Uplink logic collision (5xx)`);
+        throw new Error(`Uplink Error`);
       }
       
       if (response.status === 401 || response.status === 403) {
-        const detail = await response.clone().json().catch(() => ({}));
-        console.error(`[Syndicate] Identity Failure ${response.status}:`, detail.detail || "Authentication required");
+        console.error(`[Syndicate] Identity validation failed (40x)`);
       }
       
-      if (response.status >= 400) {
-        console.error(`[Syndicate] Client Error ${response.status} on ${url}`);
+      if (response.status >= 400 && response.status !== 408) {
+        // Deterministic failure: No retry for non-timeout client errors
+        return response;
       }
 
-      if (response.status === 429) {
-        throw new Error("Rate Limit Exceeded");
-      }
+      // If it's a 408 (simulated by fetch timeout or actual status)
+      throw new Error("RETRYABLE_TIMEOUT");
 
-      // 4xx — return as-is, caller handles
-      return response;
     } catch (err: any) {
       clearTimeout(id);
       lastError = err;
 
-      if (err.name === "AbortError") {
-        const reason = err.cause || (err as any).reason;
-
-        // Component unmounted / manual abort — exit immediately, don't retry
-        if (!reason || reason !== "TIMEOUT_EXCEEDED") {
-          throw err;
-        }
-
-        console.warn(
-          `[Syndicate] Timeout (${timeoutMs}ms) on attempt ${i + 1}/${retries}: ${url}`
-        );
-
-        if (i === retries - 1) {
-          throw new Error("TIMEOUT_EXCEEDED");
-        }
+      // Deterministic Exit: Only retry on TIMEOUT_EXCEEDED (408 logic)
+      const isRetryable = err.name === "AbortError" && (err.cause === "TIMEOUT_EXCEEDED" || (err as any).reason === "TIMEOUT_EXCEEDED");
+      
+      if (!isRetryable && err.message !== "RETRYABLE_TIMEOUT") {
+        throw err;
       }
 
-      // Exponential backoff between retries (1s, 2s)
+      console.warn(`[Syndicate] Latency spike on attempt ${i + 1}/${retries}. Retrying...`);
+
+      // Exponential backoff
       const delay = Math.pow(2, i) * 1000;
       await new Promise((res) => setTimeout(res, delay));
     }

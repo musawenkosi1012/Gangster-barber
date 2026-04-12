@@ -8,6 +8,7 @@ from ...db.base import get_db
 from ...models.operational import Service as ServiceModel, ServiceImage as ServiceImageModel
 from ...schemas.operational import Service, ServiceCreate
 from ..deps import require_role
+from ...services.storage import storage_service
 
 router = APIRouter()
 
@@ -62,28 +63,32 @@ async def create_service_unified(
     if existing:
         raise HTTPException(status_code=400, detail="Service exists")
 
-    db_service = ServiceModel(
-        name=name, price=price, duration_minutes=duration_minutes,
-        description=description, is_active=is_active, sort_order=sort_order,
-        category=category, slug=slug
-    )
-    db.add(db_service)
-    db.flush() # Get ID for assets
+    try:
+        db_service = ServiceModel(
+            name=name, price=price, duration_minutes=duration_minutes,
+            description=description, is_active=is_active, sort_order=sort_order,
+            category=category, slug=slug
+        )
+        db.add(db_service)
+        db.flush() # Get ID for assets
 
-    # Image Processing logic (Shared with update)
-    if files:
-        upload_folder = f"static/uploads/services/{db_service.id}"
-        os.makedirs(f"backend/{upload_folder}", exist_ok=True)
-        for file in files:
-            safe_name = re.sub(r'[^a-zA-Z0-9.-]', '_', file.filename)
-            file_path = os.path.join(upload_folder, safe_name)
-            with open(f"backend/{file_path}", "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            db.add(ServiceImageModel(image_path=file_path, service_id=db_service.id))
+        # Image Processing logic (Atomic via Storage Service)
+        if files:
+            for file in files:
+                # Security Guard: Validation (Mime/Size)
+                if not file.content_type.startswith("image/"):
+                    raise HTTPException(status_code=400, detail=f"File {file.filename} is not an image")
+                
+                # Cloud Migration: Atomic Transfer to remote storage
+                image_url = await storage_service.upload_file(file, folder=f"services/{db_service.id}")
+                db.add(ServiceImageModel(image_path=image_url, service_id=db_service.id))
 
-    db.commit()
-    db.refresh(db_service)
-    return db_service
+        db.commit()
+        db.refresh(db_service)
+        return db_service
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"System collision during catalog ingestion: {str(e)}")
 
 @router.patch("/admin/services/{service_id}", response_model=Service)
 async def update_service_unified(
@@ -103,29 +108,32 @@ async def update_service_unified(
     if not db_service:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    if name:
-        db_service.name = name
-        db_service.slug = generate_slug(name)
-    if price is not None: db_service.price = price
-    if duration_minutes is not None: db_service.duration_minutes = duration_minutes
-    if description is not None: db_service.description = description
-    if is_active is not None: db_service.is_active = is_active
-    if sort_order is not None: db_service.sort_order = sort_order
-    if category is not None: db_service.category = category
+    try:
+        if name:
+            db_service.name = name
+            db_service.slug = generate_slug(name)
+        if price is not None: db_service.price = price
+        if duration_minutes is not None: db_service.duration_minutes = duration_minutes
+        if description is not None: db_service.description = description
+        if is_active is not None: db_service.is_active = is_active
+        if sort_order is not None: db_service.sort_order = sort_order
+        if category is not None: db_service.category = category
 
-    if files:
-        upload_folder = f"static/uploads/services/{service_id}"
-        os.makedirs(f"backend/{upload_folder}", exist_ok=True)
-        for file in files:
-            safe_name = re.sub(r'[^a-zA-Z0-9.-]', '_', file.filename)
-            file_path = os.path.join(upload_folder, safe_name)
-            with open(f"backend/{file_path}", "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            db.add(ServiceImageModel(image_path=file_path, service_id=service_id))
+        if files:
+            for file in files:
+                # Security Guard: Validation
+                if not file.content_type.startswith("image/"):
+                    continue # Skip non-images
+                
+                image_url = await storage_service.upload_file(file, folder=f"services/{service_id}")
+                db.add(ServiceImageModel(image_path=image_url, service_id=service_id))
 
-    db.commit()
-    db.refresh(db_service)
-    return db_service
+        db.commit()
+        db.refresh(db_service)
+        return db_service
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Atomic update failed: {str(e)}")
 
 # --- 🏗️ Asset Management ---
 
@@ -143,44 +151,38 @@ async def upload_multiple_service_images(
     if not service:
          raise HTTPException(status_code=404, detail="Service not found")
 
-    # Asset Directory Partitioning (Local - TODO: Migrate to S3/Cloudinary for 2026 Production)
-    upload_folder = f"static/uploads/services/{service_id}"
-    os.makedirs(f"backend/{upload_folder}", exist_ok=True)
-    
-    saved_images = []
-    for file in files:
-        # Security Guard: Sanitize filenames (Simple version)
-        safe_name = re.sub(r'[^a-zA-Z0-9.-]', '_', file.filename)
-        file_path = os.path.join(upload_folder, safe_name)
-        full_dest = os.path.join("backend", file_path)
-        
-        # Save file to local filesystem (Atomic transfer)
-        with open(full_dest, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        # Save reference in Database (Persistence Handshake)
-        new_image = ServiceImageModel(image_path=file_path, service_id=service_id)
-        db.add(new_image)
-        saved_images.append(new_image)
-        
-    db.commit()
-    return {
-        "status": "success", 
-        "images_uploaded": len(saved_images),
-        "service_id": service_id
-    }
+    try:
+        saved_images = []
+        for file in files:
+            if not file.content_type.startswith("image/"):
+                continue
+                
+            image_url = await storage_service.upload_file(file, folder=f"services/{service_id}")
+            new_image = ServiceImageModel(image_path=image_url, service_id=service_id)
+            db.add(new_image)
+            saved_images.append(new_image)
+            
+        db.commit()
+        return {
+            "status": "success", 
+            "images_uploaded": len(saved_images),
+            "service_id": service_id
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Multi-asset ingestion failed: {str(e)}")
 
 @router.delete("/admin/services/images/{image_id}", dependencies=[Depends(require_role(["admin", "it_admin", "owner"]))])
 def delete_service_image(image_id: int, db: Session = Depends(get_db)):
     """Asset Recall: Removes a specific image from the portfolio registry."""
     img = db.query(ServiceImageModel).filter(ServiceImageModel.id == image_id).first()
     if not img:
-        raise HTTPException(status_code=404, detail="Image not found")
+        return {"status": "error", "message": "Asset not found"} # Silent fail for idempotent logic
     
-    # Optional: Delete from disk here if desired
-    # if os.path.exists(f"backend/{img.image_path}"):
-    #     os.remove(f"backend/{img.image_path}")
-        
-    db.delete(img)
-    db.commit()
-    return {"status": "success", "message": "Asset decommissioned"}
+    try:
+        db.delete(img)
+        db.commit()
+        return {"status": "success", "message": "Asset decommissioned"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to decommission asset")
