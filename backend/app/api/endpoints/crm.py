@@ -5,6 +5,8 @@ from sqlalchemy import or_, func
 from sqlalchemy.exc import SQLAlchemyError
 from ...core.limiter import limiter
 from ...db.base import get_db
+from ...crud.customer import customer_crud
+from ...crud.booking import booking_crud
 from ...models.crm import Customer as CustomerModel
 from ...models.booking import Booking as BookingModel
 from ...models.technical import AuditLog
@@ -19,39 +21,25 @@ def list_customers(
     sort_by: str = "last_visit_at", # last_visit_at, total_spend
     db: Session = Depends(get_db),
     current_admin: Dict[str, Any] = Depends(require_role(["admin", "barber", "barber_admin", "owner", "it_admin"]))
-):
+) -> List[CustomerModel]:
     """The CRM Search Engine: Returns high-performance filterable customer list with behavioral insights."""
-    query = db.query(CustomerModel)
-    if search:
-        query = query.filter(or_(
-            CustomerModel.full_name.ilike(f"%{search}%"),
-            CustomerModel.phone.ilike(f"%{search}%")
-        ))
-
-    if sort_by == "total_spend":
-        query = query.order_by(CustomerModel.total_spend.desc())
-    else:
-        query = query.order_by(CustomerModel.last_visit_at.desc().nullslast())
-
-    return query.all()
+    return customer_crud.search(db, search, sort_by)
 
 @router.get("/{customer_id}", response_model=CustomerDetail)
 def get_customer_detail(
     customer_id: int, 
     db: Session = Depends(get_db),
     current_admin: Dict[str, Any] = Depends(require_role(["admin", "barber", "barber_admin", "owner", "it_admin"]))
-):
+) -> Dict[str, Any]:
     """360-Degree Profile: Aggregates historical metrics, LTV, and reliability scores for a single explorer."""
-    customer = db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
+    customer = customer_crud.get_by_id(db, customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer Profile not found.")
 
     # Forensic Match: We link bookings via Clerk ID or Name
     history = []
     if customer.clerk_id:
-        history = db.query(BookingModel).filter(
-            BookingModel.user_id == customer.clerk_id
-        ).order_by(BookingModel.booking_date.desc()).all()
+        history = booking_crud.list_by_user(db, customer.clerk_id)
     elif customer.full_name:
         history = db.query(BookingModel).filter(
             BookingModel.name == customer.full_name
@@ -98,9 +86,9 @@ def patch_customer_intelligence(
     request: Request,
     db: Session = Depends(get_db),
     current_admin: Dict[str, Any] = Depends(require_role(["admin", "barber", "barber_admin", "owner", "it_admin"]))
-):
+) -> CustomerModel:
     """Intelligence Update: Modifies behavior notes, status (VIP/Blocked), and tactical tags."""
-    customer = db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
+    customer = customer_crud.get_by_id(db, customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="Identity Record not found.")
 
@@ -111,14 +99,14 @@ def patch_customer_intelligence(
 
     # Security Log: State mutation audit
     if "status" in update_data and update_data["status"] != old_status:
-        audit = AuditLog(
+        booking_crud.create_audit(
+            db,
             actor_id=current_admin.get("sub"),
             role=current_admin.get("metadata", {}).get("role", "admin"),
             action="CRM_STATUS_CHANGE",
             resource_id=str(customer_id),
-            metadata_json={"id": customer_id, "from": old_status, "to": update_data["status"]}
+            metadata={"id": customer_id, "from": old_status, "to": update_data["status"]}
         )
-        db.add(audit)
 
     try:
         db.commit()

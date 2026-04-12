@@ -10,6 +10,7 @@ from ...models.operational import Service as ServiceModel, ServiceImage as Servi
 from ...schemas.operational import Service, ServiceCreate
 from ..deps import require_role
 from ...services.storage import storage_service
+from ...crud.service import service_crud
 
 router = APIRouter()
 
@@ -23,11 +24,9 @@ def generate_slug(name: str) -> str:
 # --- 🛰️ Public Stream (Consumer Feed) ---
 
 @router.get("/services", response_model=List[Service])
-def list_public_services(db: Session = Depends(get_db)):
+def list_public_services(db: Session = Depends(get_db)) -> List[ServiceModel]:
     """The Shop Floor Menu: Returns only active services sorted by their priority."""
-    return db.query(ServiceModel).options(joinedload(ServiceModel.images)).filter(
-        ServiceModel.is_active == True
-    ).order_by(ServiceModel.sort_order.asc()).all()
+    return service_crud.list_active(db)
 
 # --- 🛡️ Admin Stream (Inventory Control) ---
 
@@ -35,9 +34,9 @@ def list_public_services(db: Session = Depends(get_db)):
 def list_admin_services(
     current_user: dict = Depends(require_role(["admin", "it_admin", "owner"])),
     db: Session = Depends(get_db)
-):
+) -> List[ServiceModel]:
     """The Master Inventory: Returns all services including inactive ones for management."""
-    return db.query(ServiceModel).options(joinedload(ServiceModel.images)).order_by(ServiceModel.sort_order.asc()).all()
+    return service_crud.list_all(db)
 
 @router.post("/admin/services", response_model=Service)
 async def create_service_unified(
@@ -60,7 +59,7 @@ async def create_service_unified(
         raise HTTPException(status_code=400, detail="Duration must be multiple of 40")
 
     slug = generate_slug(name)
-    existing = db.query(ServiceModel).filter((ServiceModel.name == name) | (ServiceModel.slug == slug)).first()
+    existing = service_crud.get_by_slug_or_name(db, name, slug)
     if existing:
         raise HTTPException(status_code=400, detail="Service exists")
 
@@ -116,7 +115,7 @@ async def update_service_unified(
     current_user: dict = Depends(require_role(["admin", "it_admin", "owner"])),
     db: Session = Depends(get_db)
 ):
-    db_service = db.query(ServiceModel).filter(ServiceModel.id == service_id).first()
+    db_service = service_crud.get_by_id(db, service_id)
     if not db_service:
         raise HTTPException(status_code=404, detail="Service not found")
 
@@ -171,7 +170,7 @@ async def upload_multiple_service_images(
     Tactical Multi-Asset Ingestion: Processes high-resolution service photos for the catalog.
     Enforces 'Antigravity' by keeping the existing core relational integrity.
     """
-    service = db.query(ServiceModel).filter(ServiceModel.id == service_id).first()
+    service = service_crud.get_by_id(db, service_id)
     if not service:
          raise HTTPException(status_code=404, detail="Service not found")
 
@@ -208,9 +207,9 @@ async def upload_multiple_service_images(
         raise HTTPException(status_code=500, detail=f"Asset logic failed: {str(e)}")
 
 @router.delete("/admin/services/images/{image_id}", dependencies=[Depends(require_role(["admin", "it_admin", "owner"]))])
-def delete_service_image(image_id: int, db: Session = Depends(get_db)):
+def delete_service_image(image_id: int, db: Session = Depends(get_db)) -> Dict[str, str]:
     """Asset Recall: Removes a specific image from the portfolio registry."""
-    img = db.query(ServiceImageModel).filter(ServiceImageModel.id == image_id).first()
+    img = service_crud.get_image_by_id(db, image_id)
     if not img:
         return {"status": "error", "message": "Asset not found"} # Silent fail for idempotent logic
     

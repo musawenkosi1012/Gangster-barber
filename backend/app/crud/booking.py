@@ -1,8 +1,9 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from ...models.operational import Booking, PaymentTransaction
-from ...schemas.booking import BookingCreate, BookingUpdate
+from ...models.operational import Booking, PaymentTransaction, PaymentEvent, AuditLog
+from ...schemas.booking import BookingCreate, BookingUpdate, Booking as BookingSchema
+from datetime import date, datetime
 
 class BookingRepository:
     """Enterprise Persistence Layer for Barber Session Scheduling."""
@@ -16,8 +17,53 @@ class BookingRepository:
         return db.query(Booking).filter(Booking.user_id == user_id).order_by(Booking.booking_date.desc()).all()
 
     @staticmethod
-    def list_by_date(db: Session, booking_date: str) -> List[Booking]:
+    def list_by_date(db: Session, booking_date: date) -> List[Booking]:
         return db.query(Booking).filter(Booking.booking_date == booking_date).order_by(Booking.slot_time.asc()).all()
+
+    @staticmethod
+    def get_next_arrival(db: Session, target_date: date, min_time: str) -> Optional[Booking]:
+        return db.query(Booking).filter(
+            Booking.booking_date == target_date,
+            Booking.slot_time > min_time,
+            Booking.status == "CONFIRMED"
+        ).order_by(Booking.slot_time.asc()).first()
+
+    @staticmethod
+    def get_manual_review_transactions(db: Session) -> List[PaymentTransaction]:
+        return db.query(PaymentTransaction).filter(
+            PaymentTransaction.status == "manual_review"
+        ).order_by(PaymentTransaction.created_at.asc()).all()
+
+    @staticmethod
+    def list_ledger(db: Session, status: Optional[str] = None, search: Optional[str] = None) -> List[PaymentTransaction]:
+        query = db.query(PaymentTransaction)
+        if status:
+            query = query.filter(PaymentTransaction.status == status)
+        if search:
+            query = query.filter(PaymentTransaction.provider_ref.ilike(f"%{search}%"))
+        return query.order_by(PaymentTransaction.created_at.desc()).all()
+
+    @staticmethod
+    def create_payment_event(db: Session, tx_id: int, event_type: str, raw_data: dict) -> PaymentEvent:
+        event = PaymentEvent(
+            transaction_id=tx_id,
+            event_type=event_type,
+            raw_data=raw_data
+        )
+        db.add(event)
+        return event
+
+    @staticmethod
+    def create_audit(db: Session, actor_id: str, role: str, action: str, resource_id: str, metadata: dict) -> AuditLog:
+        audit = AuditLog(
+            actor_id=actor_id,
+            role=role,
+            action=action,
+            resource_id=resource_id,
+            metadata_json=metadata
+        )
+        db.add(audit)
+        return audit
 
     @staticmethod
     def get_pending_transaction(db: Session, booking_id: int) -> Optional[PaymentTransaction]:

@@ -5,6 +5,8 @@ from ...db.base import get_db
 from ...models.technical import AuditLog, PaymentTransaction, SystemAlert
 from ...services.scheduler import scheduler
 from ..deps import require_role
+from ...crud.technical import technical_crud
+from ...crud.booking import booking_crud
 from typing import List, Dict, Any
 import time
 
@@ -16,20 +18,17 @@ def get_audit_logs(
     db: Session = Depends(get_db), 
     limit: int = 50, 
     offset: int = 0
-):
+) -> List[AuditLog]:
     """A stream of who changed what across the entire operational environment."""
-    logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).offset(offset).limit(limit).all()
-    return logs
+    return technical_crud.list_audit_logs(db, limit, offset)
 
 @router.get("/payments/alerts")
-def get_payment_alerts(db: Session = Depends(get_db)):
+def get_payment_alerts(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     The 'Urgent Payments' Payload.
     Categorizes unresolved EcoCash/OneMoney transactions by age and provider.
     """
-    pending = db.query(PaymentTransaction).filter(
-        PaymentTransaction.status == "manual_review"
-    ).all()
+    pending = booking_crud.get_manual_review_transactions(db)
     
     provider_counts = {}
     oldest_ts = None
@@ -50,7 +49,7 @@ def get_payment_alerts(db: Session = Depends(get_db)):
     }
 
 @router.get("/system/health")
-def get_health(db: Session = Depends(get_db)):
+def get_health(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Status of DB, Auth (Clerk), and Paynow API connectivity."""
     start_time = time.time()
     try:
@@ -64,6 +63,6 @@ def get_health(db: Session = Depends(get_db)):
     return {
         "status": db_status if latency_ms > 0 else "DEGRADED",
         "database_latency_ms": round(latency_ms, 2),
-        "recent_critical_alerts": db.query(SystemAlert).filter(SystemAlert.level == "CRITICAL", SystemAlert.resolved == 0).count(),
+        "recent_critical_alerts": technical_crud.count_critical_alerts(db),
         "active_it_engine": True
     }

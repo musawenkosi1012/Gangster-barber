@@ -6,6 +6,9 @@ from ...models import Booking, BlockedSlot, Service, AuditLog, PaymentTransactio
 from sqlalchemy.exc import SQLAlchemyError
 from ...schemas.booking import Booking as BookingSchema, BookingUpdate
 from ...schemas.operational import AdminStats, BlockedSlotCreate, BlockedSlot as BlockedSlotSchema
+from ...crud.booking import booking_crud
+from ...crud.service import service_crud
+from ...crud.operational import operational_crud
 from ...services.scheduler import scheduler
 from ...services.health import health_service
 from ..deps import get_current_admin
@@ -16,9 +19,9 @@ import time
 router = APIRouter(prefix="/api/v1/admin", dependencies=[Depends(get_current_admin)])
 
 @router.patch("/bookings/{booking_id}/transition")
-def transition_booking(booking_id: int, to_status: str, db: Session = Depends(get_db), current_admin: Dict[str, Any] = Depends(get_current_admin)):
+def transition_booking(booking_id: int, to_status: str, db: Session = Depends(get_db), current_admin: Dict[str, Any] = Depends(get_current_admin)) -> Dict[str, Any]:
     """Lifecycle controller: Moves a booking through its operational states."""
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = booking_crud.get_by_id(db, booking_id)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
 
@@ -26,15 +29,15 @@ def transition_booking(booking_id: int, to_status: str, db: Session = Depends(ge
     booking.status = to_status.upper()
     
     # Audit log for IT forensics
-    audit = AuditLog(
-        actor_id=current_admin.get("sub", "unknown"),
-        role=current_admin.get("metadata", {}).get("role", "admin"),
-        action="LIFECYCLE_TRANSITION",
-        resource_id=str(booking_id),
-        metadata_json={"from": old_status, "to": booking.status}
-    )
     try:
-        db.add(audit)
+        booking_crud.create_audit(
+            db,
+            actor_id=current_admin.get("sub", "unknown"),
+            role=current_admin.get("metadata", {}).get("role", "admin"),
+            action="LIFECYCLE_TRANSITION",
+            resource_id=str(booking_id),
+            metadata={"from": old_status, "to": booking.status}
+        )
         db.commit()
         return {"message": "Transition successful", "status": booking.status}
     except SQLAlchemyError:
@@ -56,8 +59,8 @@ async def admin_dashboard_bootstrap(
     today = zims_now.date()
 
     # --- 1. BI & KPI CALCULATIONS (Synchronous Block) ---
-    today_bookings = db.query(Booking).filter(Booking.booking_date == today).all()
-    services = db.query(Service).all()
+    today_bookings = booking_crud.list_by_date(db, today)
+    services = service_crud.list_all(db)
     price_map = {s.name: s.price for s in services}
 
     paid_bookings = [b for b in today_bookings if b.status in ["COMPLETED", "CONFIRMED"]]
@@ -72,16 +75,10 @@ async def admin_dashboard_bootstrap(
     daily_load = (booked_slots / total_slots * 100) if total_slots > 0 else 0
 
     now_time_str = zims_now.strftime("%H:%M")
-    next_up = db.query(Booking).filter(
-        Booking.booking_date == today,
-        Booking.slot_time > now_time_str,
-        Booking.status == "CONFIRMED"
-    ).order_by(Booking.slot_time.asc()).first()
+    next_up = booking_crud.get_next_arrival(db, today, now_time_str)
 
     # --- 2. PAYMENT ALERTS ---
-    pending_txs = db.query(PaymentTransaction).filter(
-        PaymentTransaction.status == "manual_review"
-    ).order_by(PaymentTransaction.created_at.asc()).all()
+    pending_txs = booking_crud.get_manual_review_transactions(db)
 
     # --- 3. HEALTH PROBES (direct await, no create_task for serverless safety) ---
     try:
@@ -138,26 +135,25 @@ async def admin_bootstrap_legacy(
     return await admin_dashboard_bootstrap(response, db, current_admin)
 
 @router.get("/dashboard/overview")
-def get_dashboard_pulse(db: Session = Depends(get_db)):
+def get_dashboard_pulse(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Strategic Pulse: High-performance KPI delivery."""
     zims_now = scheduler.get_zimbabwe_now()
     today = zims_now.date()
-    bookings = db.query(Booking).filter(Booking.booking_date == today).all()
+    bookings = booking_crud.list_by_date(db, today)
     return {"stats": {"revenue": 0, "completed": len(bookings)}} # Simplified for now
 
 @router.get("/bookings/schedule", response_model=List[BookingSchema])
-def get_flash_schedule(date: Optional[date] = None, db: Session = Depends(get_db)):
+def get_flash_schedule(date: Optional[date] = None, db: Session = Depends(get_db)) -> List[Booking]:
     """Chronological stream of today's slots with full customer and status metadata."""
     date_to_check = date or scheduler.get_zimbabwe_now().date()
-    return db.query(Booking).filter(Booking.booking_date == date_to_check).order_by(Booking.slot_time.asc()).all()
+    return booking_crud.list_by_date(db, date_to_check)
 
 @router.post("/slots/block", response_model=BlockedSlotSchema)
-def block_slot(req: BlockedSlotCreate, db: Session = Depends(get_db)):
-    exists = db.query(BlockedSlot).filter(BlockedSlot.date == req.date, BlockedSlot.slot_time == req.slot_time).first()
+def block_slot(req: BlockedSlotCreate, db: Session = Depends(get_db)) -> BlockedSlot:
+    exists = operational_crud.get_blocked_slot(db, req.date, req.slot_time)
     if exists: raise HTTPException(status_code=400, detail="Slot already blocked")
     try:
-        new_block = BlockedSlot(**req.model_dump())
-        db.add(new_block)
+        new_block = operational_crud.create_blocked_slot(db, **req.model_dump())
         db.commit()
         db.refresh(new_block)
         return new_block
@@ -166,13 +162,13 @@ def block_slot(req: BlockedSlotCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Database lock failure on slot segment")
 
 @router.get("/notifications/critical")
-def get_critical_notifications(db: Session = Depends(get_db)):
+def get_critical_notifications(db: Session = Depends(get_db)) -> List[Notification]:
     """Operational Signals: Fetches all unresolved high-priority incidents."""
-    return db.query(Notification).filter(Notification.is_resolved == False).order_by(Notification.created_at.desc()).all()
+    return operational_crud.list_critical_notifications(db)
 
 @router.post("/notifications/{notif_id}/resolve")
-def resolve_notification(notif_id: int, db: Session = Depends(get_db)):
-    notif = db.query(Notification).filter(Notification.id == notif_id).first()
+def resolve_notification(notif_id: int, db: Session = Depends(get_db)) -> Dict[str, str]:
+    notif = operational_crud.get_notification(db, notif_id)
     if notif:
         try:
             notif.is_resolved = True
@@ -184,20 +180,15 @@ def resolve_notification(notif_id: int, db: Session = Depends(get_db)):
     raise HTTPException(status_code=404, detail="Notification not found")
 
 @router.get("/ledger")
-def get_admin_ledger(status: Optional[str] = None, search: Optional[str] = None, db: Session = Depends(get_db)):
+def get_admin_ledger(status: Optional[str] = None, search: Optional[str] = None, db: Session = Depends(get_db)) -> List[PaymentTransaction]:
     """The Professional Ledger: Filterable chronological history of all payment attempts."""
-    query = db.query(PaymentTransaction)
-    if status:
-        query = query.filter(PaymentTransaction.status == status)
-    if search:
-        query = query.filter(PaymentTransaction.provider_ref.ilike(f"%{search}%"))
-    return query.order_by(PaymentTransaction.created_at.desc()).all()
+    return booking_crud.list_ledger(db, status, search)
 
 @router.post("/ledger/{tx_id}/match")
-def match_transaction(tx_id: int, booking_id: int, db: Session = Depends(get_db), current_admin: Dict[str, Any] = Depends(get_current_admin)):
+def match_transaction(tx_id: int, booking_id: int, db: Session = Depends(get_db), current_admin: Dict[str, Any] = Depends(get_current_admin)) -> Dict[str, str]:
     """Manual Reconciliation: Links a floating transaction to a specific customer booking."""
     tx = db.query(PaymentTransaction).filter(PaymentTransaction.id == tx_id).first()
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = booking_crud.get_by_id(db, booking_id)
     
     if not tx or not booking:
         raise HTTPException(status_code=404, detail="Transaction or Booking not found")
@@ -208,19 +199,15 @@ def match_transaction(tx_id: int, booking_id: int, db: Session = Depends(get_db)
     booking.status = "CONFIRMED"
     
     # Audit: Create the event log
-    event = PaymentEvent(
-        transaction_id=tx_id,
+    booking_crud.create_payment_event(
+        db,
+        tx_id=tx_id,
         event_type="RECONCILIATION_MATCH",
         raw_data={"admin": current_admin.get("sub"), "booking_id": booking_id}
     )
-    db.add(event)
     
     # Resolution: Close related notification if exists
-    notif = db.query(Notification).filter(
-        Notification.type == "PAYMENT_EXCEPTION",
-        Notification.message.contains(tx.provider_ref or ""),
-        Notification.is_resolved == False
-    ).first()
+    notif = operational_crud.get_payment_exception_notification(db, tx.provider_ref or "")
     if notif:
         notif.is_resolved = True
         
@@ -232,11 +219,10 @@ def match_transaction(tx_id: int, booking_id: int, db: Session = Depends(get_db)
         raise HTTPException(status_code=500, detail="Manual reconciliation handshake failed")
 
 @router.delete("/slots/unblock/{block_id}")
-def unblock_slot(block_id: int, db: Session = Depends(get_db)):
-    db_block = db.query(BlockedSlot).filter(BlockedSlot.id == block_id).first()
-    if not db_block: raise HTTPException(status_code=404, detail="Not found")
+def unblock_slot(block_id: int, db: Session = Depends(get_db)) -> Dict[str, str]:
+    success = operational_crud.delete_blocked_slot(db, block_id)
+    if not success: raise HTTPException(status_code=404, detail="Not found")
     try:
-        db.delete(db_block)
         db.commit()
         return {"message": "Unblocked"}
     except SQLAlchemyError:
