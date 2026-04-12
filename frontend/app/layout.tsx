@@ -70,6 +70,9 @@ export const metadata: Metadata = {
     ],
   },
   manifest: "/site.webmanifest",
+  verification: {
+    google: 'yoXmmh9Y-y3Lts1Ay8QOPcLNTsV9ZJCQKMSXnTP84IM',
+  },
   alternates: {
     canonical: SITE_URL,
   },
