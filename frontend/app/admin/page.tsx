@@ -161,8 +161,7 @@ export default function AdminDashboard() {
               Could Not Load Schedule
             </h2>
             <p className="text-white/30 text-xs font-bold max-w-sm">
-              The backend at <code className="text-red-500/50">http://localhost:8005</code> could not be reached. 
-              Ensure the FastAPI server is running and your <code className="text-red-500/50">.env</code> is configured for local development.
+              Could not reach the backend API. Check your internet connection or try again shortly.
             </p>
           </div>
           <button

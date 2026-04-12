@@ -94,27 +94,28 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_sc
             }
         )
 
-        # Fix 10: Validate 'azp' claim to prevent cross-service token abuse.
-        # CLERK_AUTHORIZED_PARTY should be set to your frontend origin, e.g.
-        # https://gangster-barber-frontend.vercel.app
-        authorized_party = os.getenv("CLERK_AUTHORIZED_PARTY", "")
-        if authorized_party:
+        # Validate 'azp' claim — supports comma-separated list of allowed origins
+        # e.g. CLERK_AUTHORIZED_PARTY=https://gangsterbarber.com,https://gangster-barber-frontend.vercel.app
+        authorized_party_env = os.getenv("CLERK_AUTHORIZED_PARTY", "")
+        if authorized_party_env:
+            allowed = [p.strip() for p in authorized_party_env.split(",") if p.strip()]
             token_azp = payload.get("azp", "")
-            if token_azp != authorized_party:
+            if token_azp not in allowed:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Identity verification failed: Token not issued for this application"
                 )
 
         return payload
-        
+
+    except HTTPException:
+        raise
     except JWTError as e:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Identity verification failed: {str(e)}"
         )
     except Exception as e:
-        # Catch-all for unexpected parsing errors to prevent 500 crashes
         print(f"INTERNAL SECURITY ERROR: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
