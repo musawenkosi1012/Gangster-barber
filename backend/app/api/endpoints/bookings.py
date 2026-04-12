@@ -9,9 +9,10 @@ from ...db.base import get_db
 from ...models import Booking, PaymentTransaction, AuditLog
 from ..deps import get_current_user
 from ...crud.booking import booking_crud
-import os
+from ...core.limiter import limiter
 from datetime import date, datetime
 from typing import List, Optional, Annotated
+import os
 
 router = APIRouter()
 
@@ -31,7 +32,8 @@ class PaymentStatusResponse(BaseModel):
     409: {"description": "Double booking detected"},
     500: {"description": "Internal database error"}
 })
-def create_booking(req: BookingCreate, db: db_dependency, user: dict = Depends(get_current_user)) -> Booking:
+@limiter.limit("5/minute")
+def create_booking(req: BookingCreate, db: db_dependency, request: Request, user: dict = Depends(get_current_user)) -> Booking:
     # Identity Guard: Ensure user can only book for themselves
     if req.user_id != user.get("sub"):
         raise HTTPException(status_code=403, detail="CSRF Violation: Identity mismatch")

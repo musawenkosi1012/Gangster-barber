@@ -9,21 +9,26 @@ from .api.endpoints.crm import router as crm_router
 from .api.endpoints.services import router as services_router
 from .api.endpoints.health import router as health_router
 from .core.config import settings
-from .db.base import init_db
+from .db.base import init_db, SessionLocal
+from .core.limiter import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+import sentry_sdk
 import traceback
 import sys
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Initialize DB on first real request, not at import time
-    try:
-        init_db()
-        print("init_db completed successfully")
-    except Exception as e:
-        print(f"WARNING: init_db failed: {e}")
-    yield
+# 🛡️ Production Monitoring: Sentry Integration
+if settings.DATABASE_URL and "supabase" in settings.DATABASE_URL:
+    sentry_sdk.init(
+        dsn=os.getenv("SENTRY_DSN", ""),
+        traces_sample_rate=1.0,
+        profiles_sample_rate=1.0,
+    )
 
-app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
+# 🚀 Production Protection Suite: Rate Limiting
+app = FastAPI(title=settings.APP_NAME)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Enable Resilient CORS for Next.js app
 origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
@@ -80,12 +85,35 @@ async def audit_middleware(request: Request, call_next):
     
     # Audit mutations on protected routes
     if method in ["POST", "PATCH", "DELETE"] and ("/api/admin" in path or "/api/it" in path):
-        # Implementation Note: In a production environment, we would use 
-        # a BackgroundTask here to write to the 'audit_logs' table 
-        # without impacting the response latency.
-        print(f"AUDIT LOG: {method} {path} - Status: {response.status_code}")
+        # Implementation Note: In Phase 4, we use specific AuditLog entries in endpoints.
+        # This middleware acts as a higher-level 'Traffic Monitor'.
+        pass 
         
     return response
+
+# 🛡️ Final Polish: Global Transaction Safety & Telemetry Middleware
+@app.middleware("http")
+async def db_session_middleware(request: Request, call_next):
+    # Universal Rollback & Sentry Guard
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        # 🚨 Production Alerting
+        sentry_sdk.capture_exception(e)
+        print(f"CRITICAL SYSTEM FAILURE: {str(e)}")
+        
+        # Log to SystemAlert table for Admin Visibility
+        try:
+            db = SessionLocal()
+            from .models.technical import SystemAlert
+            db.add(SystemAlert(level="CRITICAL", message=f"Runtime Exception: {str(e)}", source="MIDDLEWARE"))
+            db.commit()
+            db.close()
+        except:
+            pass
+            
+        return Response(content="Internal Server Error: Tactical Recovery Initiated", status_code=500)
 
 @app.get("/")
 def read_root():

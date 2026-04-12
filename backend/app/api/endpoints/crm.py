@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from sqlalchemy.exc import SQLAlchemyError
-from typing import List, Optional, Dict, Any
+from ...core.limiter import limiter
 from ...db.base import get_db
 from ...models.crm import Customer as CustomerModel
 from ...models.booking import Booking as BookingModel
@@ -90,9 +91,11 @@ def get_customer_detail(
     }
 
 @router.patch("/{customer_id}", response_model=Customer)
+@limiter.limit("10/minute")
 def patch_customer_intelligence(
     customer_id: int,
     data: CustomerUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_admin: Dict[str, Any] = Depends(require_role(["admin", "barber", "barber_admin", "owner", "it_admin"]))
 ):
