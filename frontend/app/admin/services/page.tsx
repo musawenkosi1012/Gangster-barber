@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { syndicateFetch } from "@/utils/api";
+import { transformAssetUrl } from "@/utils/cdn";
 import Image from "next/image";
 
 interface ServiceImage {
@@ -25,6 +26,10 @@ interface Service {
 export default function AdminServices() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const [services, setServices] = useState<Service[]>([]);
+  
+  // ⚡ Logic Jitter Protection: Memoize the view loop
+  const serviceList = useMemo(() => services, [services]);
+  
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -143,12 +148,12 @@ export default function AdminServices() {
 
       {/* 🖼️ Service Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {services.map((service) => (
+        {serviceList.map((service) => (
           <div key={service.id} className="group relative bg-white/[0.02] border border-white/5 rounded-[2.5rem] overflow-hidden hover:bg-white/[0.04] transition-all">
              <div className="aspect-[16/10] bg-white/5 relative overflow-hidden">
                 {service.images && service.images.length > 0 ? (
                   <Image 
-                    src={service.images[0].image_path.startsWith('http') ? service.images[0].image_path : `/${service.images[0].image_path}`} 
+                    src={transformAssetUrl(service.images[0].image_path)} 
                     alt={service.name} 
                     fill 
                     className="object-cover group-hover:scale-110 transition-transform duration-700" 
@@ -267,7 +272,7 @@ export default function AdminServices() {
                         return (
                           <div key={img.id} className="group/img aspect-square bg-white/5 rounded-xl overflow-hidden border border-white/5 relative">
                             <Image 
-                              src={imgSrc} 
+                              src={transformAssetUrl(img.image_path, 200, 200)} 
                               alt="Gallery Preview" 
                               width={100} 
                               height={100} 

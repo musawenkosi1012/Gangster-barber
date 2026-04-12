@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { syndicateFetch } from "@/utils/api";
 
@@ -82,6 +82,11 @@ export default function CustomersPage() {
     if (selectedId && isLoaded && isSignedIn) fetchDetail(selectedId); 
   }, [selectedId, isLoaded, isSignedIn]);
 
+  // ⚡ Render Optimization: Memoize the search results
+  const filteredCustomers = useMemo(() => {
+    return customers; // Filtering is already done on the backend via fetchList search param
+  }, [customers]);
+
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-200px)] gap-8">
       
@@ -103,10 +108,10 @@ export default function CustomersPage() {
         <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-none">
           {isListLoading ? (
             [...Array(6)].map((_, i) => <div key={i} className="h-20 bg-white/5 rounded-2xl animate-pulse" />)
-          ) : customers.length === 0 ? (
+          ) : filteredCustomers.length === 0 ? (
              <div className="text-center py-20 opacity-20 text-[10px] font-black uppercase tracking-widest">No customers found</div>
           ) : (
-            customers.map((c) => (
+            filteredCustomers.map((c) => (
               <button 
                 key={c.id}
                 onClick={() => setSelectedId(c.id)}

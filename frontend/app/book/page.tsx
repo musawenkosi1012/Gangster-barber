@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Navbar from "@/components/Navbar";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { syndicateFetch } from "@/utils/api";
+import { transformAssetUrl } from "@/utils/cdn";
 import { useRouter } from "next/navigation";
 import { BRAND } from "@/utils/constants";
 import Image from "next/image";
@@ -146,24 +147,24 @@ const checkActiveBookingUser = async (user: any, setSelectedDate: any, setAlloca
   }
 };
 
-const fetchAvailableSlots = async (selectedDate: string, setAvailableSlots: any, setIsSlotsLoading: any, setSlotsError: any) => {
-  setIsSlotsLoading(true);
-  setSlotsError(false);
-  try {
-    const response = await syndicateFetch(`/api/book/slots?date=${selectedDate}`);
-    if (!response.ok) {
+  const fetchAvailableSlots = useCallback(async (date: string) => {
+    setIsSlotsLoading(true);
+    setSlotsError(false);
+    try {
+      const response = await syndicateFetch(`/api/book/slots?date=${date}`);
+      if (!response.ok) {
+        setSlotsError(true);
+        return;
+      }
+      const data = await response.json();
+      setAvailableSlots(data);
+    } catch (err) {
+      console.error("Syndicate Slot Fetch Failed:", err);
       setSlotsError(true);
-      return;
+    } finally {
+      setIsSlotsLoading(false);
     }
-    const data = await response.json();
-    setAvailableSlots(data);
-  } catch (err) {
-    console.error("Syndicate Slot Fetch Failed:", err);
-    setSlotsError(true);
-  } finally {
-    setIsSlotsLoading(false);
-  }
-};
+  }, []);
 
 const startTimerInterval = (selectedDate: string, allocatedSlot: string, setTimeLeft: any) => {
   const updateTimer = () => {
@@ -228,7 +229,7 @@ const BookingSuccessView = ({ selectedDate, allocatedSlot, timeLeft, images }: {
         {images.map((img, idx) => (
           <div key={img.id} className="min-w-[280px] h-48 bg-white/5 rounded-[2rem] border border-white/5 overflow-hidden relative group">
              <Image 
-               src={img.image_path.startsWith('http') ? img.image_path : `/${img.image_path}`}
+               src={transformAssetUrl(img.image_path)}
                alt="Gallery Item"
                fill
                className="object-cover group-hover:scale-110 transition-transform duration-700"
@@ -268,7 +269,7 @@ const ServiceCatalog = ({ services, onSelect, selectedService }: { services: Ser
           <div className="absolute inset-0 bg-[#050505]">
             {s.images && s.images.length > 0 ? (
               <Image 
-                src={s.images[0].image_path.startsWith('http') ? s.images[0].image_path : `/${s.images[0].image_path}`} 
+                src={transformAssetUrl(s.images[0].image_path)} 
                 alt={s.name} 
                 fill 
                 className="object-cover group-hover:scale-110 transition-transform duration-1000" 
@@ -298,18 +299,17 @@ const ServiceCatalog = ({ services, onSelect, selectedService }: { services: Ser
   </div>
 );
 
-const generateNextDates = () => {
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    return {
-      full: d.toISOString().split('T')[0],
-      dayName: d.toLocaleDateString('en-US', { weekday: 'short' }),
-      dateNum: d.getDate(),
-      month: d.toLocaleDateString('en-US', { month: 'short' })
-    };
-  });
-};
+// Moved outside to prevent re-creation
+const STATIC_DATES = Array.from({ length: 7 }, (_, i) => {
+  const d = new Date();
+  d.setDate(d.getDate() + i);
+  return {
+    full: d.toISOString().split('T')[0],
+    dayName: d.toLocaleDateString('en-US', { weekday: 'short' }),
+    dateNum: d.getDate(),
+    month: d.toLocaleDateString('en-US', { month: 'short' })
+  };
+});
 
 export default function BookPage() {
   const { user, isLoaded } = useUser();
@@ -373,8 +373,8 @@ export default function BookPage() {
   }, [user]);
 
   useEffect(() => {
-    fetchAvailableSlots(selectedDate, setAvailableSlots, setIsSlotsLoading, setSlotsError);
-  }, [selectedDate]);
+    fetchAvailableSlots(selectedDate);
+  }, [selectedDate, fetchAvailableSlots]);
 
   useEffect(() => {
     if (bookingStatus === "success" && allocatedSlot && selectedDate) {
@@ -383,7 +383,7 @@ export default function BookPage() {
     }
   }, [bookingStatus, allocatedSlot, selectedDate]);
 
-  const handleBooking = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleBooking = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selectedService) return alert("Select a style first.");
     if (bookingMode === "custom" && !selectedSlot) return alert("Select a slot.");
@@ -395,13 +395,11 @@ export default function BookPage() {
         ? BOOKING_DEPOSIT + (selectedService?.price || 0)
         : BOOKING_DEPOSIT;
 
-      // ─── STEP 1: Initiate payment FIRST ─────────────────────────────
-      // Use relative path — Next.js rewrite proxies /api/payments/* to PayNow service
       const method = paymentMethod.replace("paynow_", "");
-      // Generate a unique reference for Paynow BEFORE the booking exists — avoids Appointment #0
       const paynowRef = typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
         : `ref-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      
       const payPayload = buildPaymentPayload(method, paynowRef, { ...formData, service: finalService }, user, phoneNumber, payAmount);
 
       const payRes = await fetch(`/api/payments/initiate`, {
@@ -417,7 +415,6 @@ export default function BookPage() {
         return;
       }
 
-      // Web redirect flow (VMC/ZimSwitch) — redirect user, booking saved after webhook
       if (payData.redirect_url) {
         window.location.href = payData.redirect_url;
         return;
@@ -426,7 +423,6 @@ export default function BookPage() {
       const pollUrl = payData.poll_url || null;
       setPaymentPollUrl(pollUrl);
 
-      // ─── STEP 2: Save booking as PENDING with poll_url ───────────────
       const bookRes = await syndicateFetch("/api/book/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -446,11 +442,8 @@ export default function BookPage() {
 
       setPendingBookingId(bookData.id);
       setAllocatedSlot(bookData.slot_time);
-
-      // ─── STEP 3: Show "awaiting payment" and poll until confirmed ────
       setBookingStatus("awaiting_payment");
 
-      // Poll backend every 4 seconds for up to 5 minutes
       const maxAttempts = 75;
       let attempts = 0;
       const poll = setInterval(async () => {
@@ -471,12 +464,11 @@ export default function BookPage() {
             return;
           }
         } catch {
-          // network hiccup — keep polling
+          // network hiccup
         }
 
         if (attempts >= maxAttempts) {
           clearInterval(poll);
-          // Timeout — show verifying state, admin can confirm manually
           setBookingStatus("verifying");
         }
       }, 4000);
@@ -484,7 +476,7 @@ export default function BookPage() {
     } catch (err) {
       setBookingStatus("error");
     }
-  };
+  }, [selectedService, bookingMode, selectedSlot, payForCut, paymentMethod, formData, user, phoneNumber, selectedDate]);
 
   if (!mounted || !isLoaded) return null;
 
@@ -570,8 +562,8 @@ export default function BookPage() {
                    <div className="flex flex-col gap-4">
                       <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 ml-1">Mission Date</span>
                       <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide">
-                        {generateNextDates().map((d) => (
-                          <button key={d.full} type="button" onClick={() => { setSelectedDate(d.full); setSelectedSlot(null); }} className={`flex flex-col items-center justify-center min-w-[70px] py-4 rounded-2xl border transition-all duration-500 ${selectedDate === d.full ? "bg-white text-black border-white shadow-xl scale-105" : "bg-white/5 border-white/5 text-white/40"}`}>{/* ...d logic */}<span className="text-[9px] font-black uppercase tracking-tighter mb-1">{d.dayName}</span><span className="text-lg font-black">{d.dateNum}</span><span className="text-[8px] font-bold uppercase opacity-60">{d.month}</span></button>
+                        {STATIC_DATES.map((d) => (
+                          <button key={d.full} type="button" onClick={() => { setSelectedDate(d.full); setSelectedSlot(null); }} className={`flex flex-col items-center justify-center min-w-[70px] py-4 rounded-2xl border transition-all duration-500 ${selectedDate === d.full ? "bg-white text-black border-white shadow-xl scale-105" : "bg-white/5 border-white/5 text-white/40"}`}><span className="text-[9px] font-black uppercase tracking-tighter mb-1">{d.dayName}</span><span className="text-lg font-black">{d.dateNum}</span><span className="text-[8px] font-bold uppercase opacity-60">{d.month}</span></button>
                         ))}
                       </div>
                    </div>

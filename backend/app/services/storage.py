@@ -29,7 +29,15 @@ class StorageService:
             raise RuntimeError("CRITICAL STORAGE FAILURE: No Cloud Asset Provider (Cloudinary/Supabase) configured.")
 
     async def upload_file(self, file: UploadFile, folder: str = "general") -> str:
-        """Atomic transfer of binary data to the cloud."""
+        """Atomic transfer of binary data to the cloud with strict policing."""
+        # Payload Policing: 5MB limit
+        if file.size > 5 * 1024 * 1024:
+            raise RuntimeError(f"ASSET_VIOLATION: {file.filename} exceeds 5MB limit")
+        
+        # Identity Check: MIME validation
+        if not file.content_type.startswith("image/"):
+            raise RuntimeError(f"TYPE_VIOLATION: {file.filename} is not an image")
+
         safe_name = re.sub(r'[^a-zA-Z0-9.-]', '_', file.filename)
         path = f"{folder}/{safe_name}"
         

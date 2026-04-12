@@ -65,12 +65,13 @@ export async function syndicateFetch(
 
       // 🛡️ Log Sanitization: Hiding granular details in production-ready logs
       if (response.status >= 500) {
-        console.error(`[Syndicate] Uplink logic collision (5xx)`);
-        throw new Error(`Uplink Error`);
+        console.error(`[Syndicate] Uplink logic collision (${response.status})`);
+        return response; // Non-retryable
       }
       
       if (response.status === 401 || response.status === 403) {
         console.error(`[Syndicate] Identity validation failed (40x)`);
+        return response; // Non-retryable
       }
       
       if (response.status >= 400 && response.status !== 408) {
