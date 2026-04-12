@@ -190,17 +190,21 @@ export default function CustomersPage() {
               </h3>
               
               <div className="space-y-4">
-                {detail.history.map((h, i) => (
-                  <div key={i} className="flex items-center justify-between p-6 bg-white/[0.03] border border-white/5 rounded-3xl hover:bg-white/[0.05] transition-all">
-                    <div>
-                      <p className="text-[10px] font-black uppercase tracking-widest text-white/80">{h.service}</p>
-                      <p className="text-[8px] font-bold text-white/20 uppercase tracking-widest mt-1">{h.date} • {h.slot}</p>
+                {!detail.history || detail.history.length === 0 ? (
+                  <div className="text-center py-10 opacity-20 text-[10px] font-black uppercase tracking-widest italic">No historical records available</div>
+                ) : (
+                  detail.history.map((h, i) => (
+                    <div key={i} className="flex items-center justify-between p-6 bg-white/[0.03] border border-white/5 rounded-3xl hover:bg-white/[0.05] transition-all">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-white/80">{h.service}</p>
+                        <p className="text-[8px] font-bold text-white/20 uppercase tracking-widest mt-1">{h.date} • {h.slot}</p>
+                      </div>
+                      <div className={`text-[7px] font-black uppercase tracking-widest py-1.5 px-4 rounded-full ${h.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/10' : h.status === 'NO_SHOW' ? 'bg-red-500/10 text-red-500 border border-red-500/10' : 'bg-white/5 text-white/30'}`}>
+                        {h.status}
+                      </div>
                     </div>
-                    <div className={`text-[7px] font-black uppercase tracking-widest py-1.5 px-4 rounded-full ${h.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/10' : h.status === 'NO_SHOW' ? 'bg-red-500/10 text-red-500 border border-red-500/10' : 'bg-white/5 text-white/30'}`}>
-                      {h.status}
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
 

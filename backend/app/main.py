@@ -71,11 +71,11 @@ async def audit_middleware(request: Request, call_next):
     """
     Automated System Auditor.
     Intercepts all mutation requests to administrative routes for logging.
-    """
     method = request.method
     path = request.url.path
     
-    print(f"DEBUG: Headers - {request.headers}")
+    # Sanitize Audit: Don't leak credentials in logs
+    print(f"REQUEST AUDIT: {method} {path} - Host: {request.headers.get('host')}")
     response = await call_next(request)
     
     # Audit mutations on protected routes

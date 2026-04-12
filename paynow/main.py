@@ -24,7 +24,7 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3005,https://gangsterbarber.com,https://www.gangsterbarber.com,https://gangster-barber-frontend.vercel.app,https://gangster-barber.vercel.app").split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,

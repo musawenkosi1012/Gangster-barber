@@ -32,9 +32,13 @@ def transition_booking(booking_id: int, to_status: str, db: Session = Depends(ge
         resource_id=str(booking_id),
         metadata_json={"from": old_status, "to": booking.status}
     )
-    db.add(audit)
-    db.commit()
-    return {"message": "Transition successful", "status": booking.status}
+    try:
+        db.add(audit)
+        db.commit()
+        return {"message": "Transition successful", "status": booking.status}
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Safe-Commit Failure: Lifecycle state inconsistent")
 
 @router.get("/dashboard/bootstrap")
 async def admin_dashboard_bootstrap(
@@ -150,11 +154,15 @@ def get_flash_schedule(date: Optional[date] = None, db: Session = Depends(get_db
 def block_slot(req: BlockedSlotCreate, db: Session = Depends(get_db)):
     exists = db.query(BlockedSlot).filter(BlockedSlot.date == req.date, BlockedSlot.slot_time == req.slot_time).first()
     if exists: raise HTTPException(status_code=400, detail="Slot already blocked")
-    new_block = BlockedSlot(**req.model_dump())
-    db.add(new_block)
-    db.commit()
-    db.refresh(new_block)
-    return new_block
+    try:
+        new_block = BlockedSlot(**req.model_dump())
+        db.add(new_block)
+        db.commit()
+        db.refresh(new_block)
+        return new_block
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Database lock failure on slot segment")
 
 @router.get("/notifications/critical")
 def get_critical_notifications(db: Session = Depends(get_db)):
@@ -165,9 +173,14 @@ def get_critical_notifications(db: Session = Depends(get_db)):
 def resolve_notification(notif_id: int, db: Session = Depends(get_db)):
     notif = db.query(Notification).filter(Notification.id == notif_id).first()
     if notif:
-        notif.is_resolved = True
-        db.commit()
-    return {"message": "Resolved"}
+        try:
+            notif.is_resolved = True
+            db.commit()
+            return {"message": "Resolved"}
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="State persistence failure")
+    raise HTTPException(status_code=404, detail="Notification not found")
 
 @router.get("/ledger")
 def get_admin_ledger(status: Optional[str] = None, search: Optional[str] = None, db: Session = Depends(get_db)):
@@ -210,13 +223,21 @@ def match_transaction(tx_id: int, booking_id: int, db: Session = Depends(get_db)
     if notif:
         notif.is_resolved = True
         
-    db.commit()
-    return {"message": "Reconciliation successful"}
+    try:
+        db.commit()
+        return {"message": "Reconciliation successful"}
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Manual reconciliation handshake failed")
 
 @router.delete("/slots/unblock/{block_id}")
 def unblock_slot(block_id: int, db: Session = Depends(get_db)):
     db_block = db.query(BlockedSlot).filter(BlockedSlot.id == block_id).first()
     if not db_block: raise HTTPException(status_code=404, detail="Not found")
-    db.delete(db_block)
-    db.commit()
-    return {"message": "Unblocked"}
+    try:
+        db.delete(db_block)
+        db.commit()
+        return {"message": "Unblocked"}
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Resource release protocol failure")

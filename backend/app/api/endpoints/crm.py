@@ -116,6 +116,10 @@ def patch_customer_intelligence(
         )
         db.add(audit)
 
-    db.commit()
-    db.refresh(customer)
-    return customer
+    try:
+        db.commit()
+        db.refresh(customer)
+        return customer
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Safe-Commit Failure: Identity record locked")

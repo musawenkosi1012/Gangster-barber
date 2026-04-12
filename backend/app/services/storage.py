@@ -10,7 +10,7 @@ class StorageService:
     """
     
     def __init__(self):
-        self.provider = "local"
+        self.provider = None
         if settings.CLOUDINARY_URL:
             import cloudinary
             import cloudinary.uploader
@@ -23,6 +23,10 @@ class StorageService:
                 base_url=f"{settings.SUPABASE_URL}/storage/v1",
                 headers={"Authorization": f"Bearer {settings.SUPABASE_KEY}", "apikey": settings.SUPABASE_KEY}
             )
+        
+        if not self.provider:
+            # Shift-Left Protocol: Fail fast rather than writing to local disk
+            raise RuntimeError("CRITICAL STORAGE FAILURE: No Cloud Asset Provider (Cloudinary/Supabase) configured.")
 
     async def upload_file(self, file: UploadFile, folder: str = "general") -> str:
         """Atomic transfer of binary data to the cloud."""
@@ -61,13 +65,7 @@ class StorageService:
                 return f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket_name}/{path}"
             
             else:
-                # Fallback to local (Scrubbed in Production for Security Audit)
-                local_dir = f"backend/static/uploads/{folder}"
-                os.makedirs(local_dir, exist_ok=True)
-                local_path = f"{local_dir}/{safe_name}"
-                with open(local_path, "wb") as f:
-                    f.write(file_content)
-                return f"static/uploads/{folder}/{safe_name}"
+                raise RuntimeError("Asset ingestion failed: Final fallback reached without provider.")
         finally:
             await file.seek(0)
 

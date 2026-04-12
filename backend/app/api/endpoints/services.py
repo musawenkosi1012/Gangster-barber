@@ -79,6 +79,10 @@ async def create_service_unified(
                 if not file.content_type.startswith("image/"):
                     raise HTTPException(status_code=400, detail=f"File {file.filename} is not an image")
                 
+                # Payload Policing: 5MB limit
+                if file.size > 5 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail=f"Asset {file.filename} exceeds 5MB limit")
+                
                 # Cloud Migration: Atomic Transfer to remote storage
                 image_url = await storage_service.upload_file(file, folder=f"services/{db_service.id}")
                 db.add(ServiceImageModel(image_path=image_url, service_id=db_service.id))
@@ -125,6 +129,11 @@ async def update_service_unified(
                 if not file.content_type.startswith("image/"):
                     continue # Skip non-images
                 
+                # Payload Policing: 5MB limit
+                if file.size > 5 * 1024 * 1024:
+                    print(f"SECURITY: Blocked oversized asset {file.filename}")
+                    continue
+                
                 image_url = await storage_service.upload_file(file, folder=f"services/{service_id}")
                 db.add(ServiceImageModel(image_path=image_url, service_id=service_id))
 
@@ -156,6 +165,10 @@ async def upload_multiple_service_images(
         for file in files:
             if not file.content_type.startswith("image/"):
                 continue
+                
+            # Payload Policing: 5MB limit
+            if file.size > 5 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail=f"Oversized asset detected: {file.filename}")
                 
             image_url = await storage_service.upload_file(file, folder=f"services/{service_id}")
             new_image = ServiceImageModel(image_path=image_url, service_id=service_id)
