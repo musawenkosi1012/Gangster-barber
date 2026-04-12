@@ -43,6 +43,6 @@ class Settings(BaseSettings):
     CLOUDINARY_URL: str = os.getenv("CLOUDINARY_URL", "")
 
     # CORS Config
-    ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3005,https://gangster-barber-frontend.vercel.app,https://gangster-barber.vercel.app,https://gangster-barber-paynow.vercel.app")
+    ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3005,https://gangsterbarber.com,https://www.gangsterbarber.com,https://gangster-barber-frontend.vercel.app,https://gangster-barber.vercel.app")
 
 settings = Settings()
