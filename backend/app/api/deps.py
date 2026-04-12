@@ -1,6 +1,8 @@
 from fastapi import HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
+from jose.exceptions import JOSEError
+import traceback
 import httpx
 import os
 from ..core.config import settings
@@ -110,13 +112,14 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(auth_sc
 
     except HTTPException:
         raise
-    except JWTError as e:
+    except (JWTError, JOSEError) as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Identity verification failed: {str(e)}"
         )
     except Exception as e:
-        print(f"INTERNAL SECURITY ERROR: {str(e)}")
+        print(f"INTERNAL SECURITY ERROR: {type(e).__name__}: {str(e)}")
+        print(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Forbidden: Security protocol failure"
