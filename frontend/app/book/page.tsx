@@ -268,6 +268,7 @@ const ServiceCatalog = ({ services, onSelect, selectedService }: { services: Ser
       {services.map((s) => (
         <button
           key={s.id}
+          type="button"
           onClick={() => onSelect(s)}
           className={`group relative h-48 rounded-3xl overflow-hidden border-2 transition-all duration-500 ${
             selectedService?.id === s.id ? 'border-amber-500 scale-[1.02]' : 'border-white/5 hover:border-white/20'
