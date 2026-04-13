@@ -1,9 +1,9 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from ...models.booking import Booking
-from ...models.technical import PaymentTransaction, PaymentEvent, AuditLog
-from ...schemas.booking import BookingCreate, BookingUpdate, Booking as BookingSchema
+from ..models.booking import Booking
+from ..models.technical import PaymentTransaction, PaymentEvent, AuditLog
+from ..schemas.booking import BookingCreate, BookingUpdate, Booking as BookingSchema
 from datetime import date, datetime
 
 class BookingRepository:

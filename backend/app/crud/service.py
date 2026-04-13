@@ -1,6 +1,6 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session, joinedload
-from ...models.operational import Service, ServiceImage
+from ..models.operational import Service, ServiceImage
 
 class ServiceRepository:
     """Enterprise Persistence Layer for Grooming Catalog Management."""
