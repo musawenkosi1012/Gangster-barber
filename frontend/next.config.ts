@@ -33,6 +33,12 @@ const nextConfig: NextConfig = {
     return [
       // /api/payments/* is handled by app/api/payments/[...path]/route.ts
       // which injects the INTERNAL_API_SECRET Bearer token server-side.
+      // This rewrite is a fallback for deployments where the API route
+      // is not yet registered (e.g. during PR preview builds).
+      {
+        source: "/api/payments/:path*",
+        destination: `${PAYNOW_URL}/api/payments/:path*`,
+      },
       // FastAPI backend — everything else under /api
       {
         source: "/api/:path*",
