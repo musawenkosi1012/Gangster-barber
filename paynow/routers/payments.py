@@ -179,17 +179,24 @@ async def initiate_payment(
         else:
             response = paynow.send(payment)
 
+        def _str(val) -> str | None:
+            """Return val if it's an actual string, else None.
+            The Paynow SDK sometimes returns the `str` type class instead of
+            a value for fields that are not applicable to the payment method."""
+            return val if isinstance(val, str) else None
+
         if response.success:
             return PaymentResponse(
                 success=True,
                 status="sent",
-                redirect_url=response.redirect_url,
-                poll_url=response.poll_url,
-                instructions=response.instructions,
-                authorization_code=getattr(response, "authorization_code", None),
-                otpreference=getattr(response, "otpreference", None)
+                redirect_url=_str(getattr(response, "redirect_url", None)),
+                poll_url=_str(getattr(response, "poll_url", None)),
+                instructions=_str(getattr(response, "instructions", None)),
+                authorization_code=_str(getattr(response, "authorization_code", None)),
+                otpreference=_str(getattr(response, "otpreference", None))
             )
         else:
+            logger.error(f"Paynow gateway rejected payment: {response.error!r}")
             return PaymentResponse(success=False, status="failed", error=response.error)
 
     except Exception as e:

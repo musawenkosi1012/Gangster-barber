@@ -67,16 +67,23 @@ export default function AdminServices() {
   }, [isLoaded, isSignedIn]);
 
   const handleSave = async () => {
+    // Vercel serverless hard limit is 4.5MB per request body
+    const MAX_UPLOAD_BYTES = 4 * 1024 * 1024; // 4MB to stay safely under the limit
+    const totalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
+    if (totalSize > MAX_UPLOAD_BYTES) {
+      alert(`Images too large (${(totalSize / 1024 / 1024).toFixed(1)}MB total). Max 4MB per save. Remove some images and try again.`);
+      return;
+    }
+
     try {
       const token = await getToken();
       const method = currentService.id ? "PATCH" : "POST";
-      const url = currentService.id 
-        ? `/api/v1/admin/services/${currentService.id}` 
+      const url = currentService.id
+        ? `/api/v1/admin/services/${currentService.id}`
         : "/api/v1/admin/services";
 
       const formData = new FormData();
-      
-      // 🛠️ Unify Metadata
+
       if (currentService.name) formData.append("name", currentService.name);
       if (currentService.price !== undefined) formData.append("price", currentService.price.toString());
       if (currentService.duration_minutes !== undefined) formData.append("duration_minutes", currentService.duration_minutes.toString());
@@ -84,25 +91,27 @@ export default function AdminServices() {
       if (currentService.is_active !== undefined) formData.append("is_active", currentService.is_active.toString());
       if (currentService.sort_order !== undefined) formData.append("sort_order", currentService.sort_order.toString());
 
-      // 🖼️ Phase 3: Tactical Multi-Asset Ingestion
       selectedFiles.forEach(file => formData.append("files", file));
 
+      // Use 60s timeout for uploads — image processing is slow on cold starts
       const response = await syndicateFetch(url, {
         method,
-        headers: { 
-          Authorization: `Bearer ${token}` 
-        },
+        headers: { Authorization: `Bearer ${token}` },
         body: formData
-      });
+      }, 2, 60000);
 
       if (response.ok) {
         setIsModalOpen(false);
         setSelectedFiles([]);
         fetchServices();
+      } else if (response.status === 413) {
+        alert("Images too large for the server. Keep total upload under 4MB.");
+      } else {
+        alert("Failed to save service. Check console for details.");
       }
     } catch (e) {
        console.error("Save failed:", e);
-       alert("Failed to save service inventory.");
+       alert("Save timed out. If uploading images, try fewer or smaller files.");
     }
   };
 

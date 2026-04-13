@@ -1,9 +1,11 @@
 fastapi
 uvicorn[standard]
 python-dotenv
+python-multipart
 paynow
 requests
 pydantic
+pydantic-settings
 httpx
 mangum>=0.17.0
 slowapi
