@@ -5,6 +5,7 @@ const BACKEND_URL =
   "https://gangster-barber-backend.vercel.app";
 
 const PAYNOW_URL =
+  process.env.PAYNOW_URL ||
   process.env.NEXT_PUBLIC_PAYNOW_URL ||
   "https://gangster-barber-paynow.vercel.app";
 
@@ -30,11 +31,8 @@ const nextConfig: NextConfig = {
    */
   async rewrites() {
     return [
-      // PayNow microservice — must come BEFORE the general backend rule
-      {
-        source: "/api/payments/:path*",
-        destination: `${PAYNOW_URL}/api/payments/:path*`,
-      },
+      // /api/payments/* is handled by app/api/payments/[...path]/route.ts
+      // which injects the INTERNAL_API_SECRET Bearer token server-side.
       // FastAPI backend — everything else under /api
       {
         source: "/api/:path*",
