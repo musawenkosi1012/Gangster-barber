@@ -32,8 +32,14 @@ export default function AdminServices() {
   
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+
+  const MAX_UPLOAD_BYTES = 4 * 1024 * 1024; // 4MB — Vercel serverless hard limit
+  const totalFileSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
+  const isOverLimit = totalFileSize > MAX_UPLOAD_BYTES;
   const [currentService, setCurrentService] = useState<Partial<Service>>({
     name: "",
     price: 0,
@@ -67,14 +73,14 @@ export default function AdminServices() {
   }, [isLoaded, isSignedIn]);
 
   const handleSave = async () => {
-    // Vercel serverless hard limit is 4.5MB per request body
-    const MAX_UPLOAD_BYTES = 4 * 1024 * 1024; // 4MB to stay safely under the limit
-    const totalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
-    if (totalSize > MAX_UPLOAD_BYTES) {
-      alert(`Images too large (${(totalSize / 1024 / 1024).toFixed(1)}MB total). Max 4MB per save. Remove some images and try again.`);
+    setSaveError(null);
+
+    if (isOverLimit) {
+      setSaveError(`Images too large — ${(totalFileSize / 1024 / 1024).toFixed(1)}MB selected, max 4MB. Remove some images and try again.`);
       return;
     }
 
+    setIsSaving(true);
     try {
       const token = await getToken();
       const method = currentService.id ? "PATCH" : "POST";
@@ -103,15 +109,18 @@ export default function AdminServices() {
       if (response.ok) {
         setIsModalOpen(false);
         setSelectedFiles([]);
+        setSaveError(null);
         fetchServices();
       } else if (response.status === 413) {
-        alert("Images too large for the server. Keep total upload under 4MB.");
+        setSaveError("Server rejected the upload — images too large. Keep total under 4MB.");
       } else {
-        alert("Failed to save service. Check console for details.");
+        setSaveError("Save failed. Check your connection and try again.");
       }
     } catch (e) {
        console.error("Save failed:", e);
-       alert("Save timed out. If uploading images, try fewer or smaller files.");
+       setSaveError("Upload timed out. Try fewer or smaller images.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -261,11 +270,24 @@ export default function AdminServices() {
                     </div>
                     
                     {selectedFiles.length > 0 && (
-                      <div className="flex items-center gap-3 p-4 bg-red-600/10 border border-red-600/20 rounded-2xl animate-in slide-in-from-left-2 duration-300">
-                        <div className="w-1 h-1 rounded-full bg-red-600 animate-pulse" />
-                        <span className="text-[9px] font-black text-red-600 uppercase tracking-[0.2em]">Staged: {selectedFiles.length} New Assets</span>
-                        <button 
-                          onClick={() => setSelectedFiles([])}
+                      <div className={`flex items-center gap-3 p-4 border rounded-2xl animate-in slide-in-from-left-2 duration-300 ${
+                        isOverLimit
+                          ? "bg-orange-600/15 border-orange-500/40"
+                          : "bg-red-600/10 border-red-600/20"
+                      }`}>
+                        <div className={`w-1.5 h-1.5 rounded-full ${isOverLimit ? "bg-orange-500" : "bg-red-600 animate-pulse"}`} />
+                        <div className="flex flex-col gap-0.5">
+                          <span className={`text-[9px] font-black uppercase tracking-[0.2em] ${isOverLimit ? "text-orange-400" : "text-red-600"}`}>
+                            Staged: {selectedFiles.length} {selectedFiles.length === 1 ? "Asset" : "Assets"} — {(totalFileSize / 1024 / 1024).toFixed(2)}MB / 4MB
+                          </span>
+                          {isOverLimit && (
+                            <span className="text-[8px] font-bold text-orange-400/80 uppercase tracking-widest">
+                              ⚠ Too large — remove files to proceed
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => { setSelectedFiles([]); setSaveError(null); }}
                           className="ml-auto text-[8px] font-black text-white/20 hover:text-white uppercase tracking-widest"
                         > Clear </button>
                       </div>
@@ -329,15 +351,36 @@ export default function AdminServices() {
                     </div>
                  </div>
 
+                 {/* Error banner */}
+                 {saveError && (
+                   <div className="flex items-start gap-3 p-5 bg-orange-600/10 border border-orange-500/30 rounded-2xl animate-in slide-in-from-bottom-2 duration-300">
+                     <span className="text-orange-400 text-sm leading-none mt-0.5">⚠</span>
+                     <div className="flex flex-col gap-1">
+                       <span className="text-[10px] font-black text-orange-400 uppercase tracking-[0.2em]">Upload Failed</span>
+                       <span className="text-[9px] text-orange-300/80 leading-relaxed">{saveError}</span>
+                     </div>
+                     <button onClick={() => setSaveError(null)} className="ml-auto text-orange-400/40 hover:text-orange-400 text-sm leading-none">×</button>
+                   </div>
+                 )}
+
                  <div className="flex gap-4 pt-8">
-                    <button 
-                      onClick={() => setIsModalOpen(false)}
+                    <button
+                      onClick={() => { setIsModalOpen(false); setSaveError(null); }}
                       className="flex-1 py-5 border border-white/10 text-white/20 text-[10px] font-black uppercase tracking-widest rounded-3xl hover:bg-white/5 transition-all"
                     > Discard </button>
-                    <button 
+                    <button
                       onClick={handleSave}
-                      className="flex-[2] py-5 bg-red-600 text-white text-[10px] font-black uppercase tracking-widest rounded-3xl hover:bg-red-500 transition-all shadow-[0_10px_40px_rgba(220,38,38,0.3)]"
-                    > Commit Inventory Change </button>
+                      disabled={isSaving || isOverLimit}
+                      className={`flex-[2] py-5 text-[10px] font-black uppercase tracking-widest rounded-3xl transition-all ${
+                        isOverLimit
+                          ? "bg-orange-600/20 text-orange-400/60 border border-orange-500/20 cursor-not-allowed"
+                          : isSaving
+                          ? "bg-red-600/50 text-white/50 cursor-not-allowed"
+                          : "bg-red-600 text-white hover:bg-red-500 shadow-[0_10px_40px_rgba(220,38,38,0.3)]"
+                      }`}
+                    >
+                      {isSaving ? "Uploading..." : isOverLimit ? "⚠ Images Too Large" : "Commit Inventory Change"}
+                    </button>
                  </div>
               </div>
            </div>
