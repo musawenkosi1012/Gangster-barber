@@ -123,7 +123,7 @@ const buildPaymentPayload = (
     payment_method: method
   };
 
-  if (method === "mobile" || method === "onemoney" || method === "innbucks" || method === "omari") {
+  if (method === "mobile" || method === "ecocash" || method === "onemoney" || method === "innbucks" || method === "omari") {
     payload.phone_number = phoneNumber;
   }
   // VMC and ZimSwitch require real card tokenisation — disabled until implemented

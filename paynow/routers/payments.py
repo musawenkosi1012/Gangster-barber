@@ -190,6 +190,7 @@ async def initiate_payment(
                 otpreference=getattr(response, "otpreference", None)
             )
         else:
+            logger.error(f"Paynow gateway rejected payment: {response.error!r}")
             return PaymentResponse(success=False, status="failed", error=response.error)
 
     except Exception as e:
