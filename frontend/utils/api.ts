@@ -11,7 +11,8 @@ let isWarm = false;
 export async function syndicateFetch(
   endpoint: string,
   options: RequestInit = {},
-  retries = 2
+  retries = 2,
+  overrideTimeoutMs?: number
 ): Promise<Response> {
   // Always use relative paths — Next.js rewrites in next.config.ts proxy
   // /api/* → FastAPI backend and /api/payments/* → PayNow microservice.
@@ -23,8 +24,8 @@ export async function syndicateFetch(
 
   let lastError: Error | null = null;
 
-  // 12s standard, 20s cold-start first attempt
-  const timeoutMs = isWarm ? 12000 : 20000;
+  // 12s standard, 20s cold-start first attempt; caller can override for uploads
+  const timeoutMs = overrideTimeoutMs ?? (isWarm ? 12000 : 20000);
 
   for (let i = 0; i < retries; i++) {
     const controller = new AbortController();
