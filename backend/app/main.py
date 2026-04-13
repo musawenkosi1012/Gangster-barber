@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
+from fastapi.responses import Response
 import logging
+import os
 
 logger = logging.getLogger("audit")
 logging.basicConfig(level=logging.INFO)
@@ -45,7 +47,6 @@ app.add_middleware(
 )
 
 from fastapi.staticfiles import StaticFiles
-import os
 
 # Connect Routers
 app.include_router(bookings_router, prefix="/api/book", tags=["Bookings"])
@@ -77,22 +78,11 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.middleware("http")
 async def audit_middleware(request: Request, call_next):
-    """
-    Automated System Auditor.
-    Intercepts all mutation requests to administrative routes for logging.
     method = request.method
     path = request.url.path
-    
-    # Sanitize Audit: Don't leak credentials in logs
-    logger.info(f"REQUEST AUDIT: {method} {path} - Host: {request.headers.get('host')}")
-    response = await call_next(request)
-    
-    # Audit mutations on protected routes
     if method in ["POST", "PATCH", "DELETE"] and ("/api/admin" in path or "/api/it" in path):
-        # Implementation Note: In Phase 4, we use specific AuditLog entries in endpoints.
-        # This middleware acts as a higher-level 'Traffic Monitor'.
-        pass 
-        
+        logger.info(f"REQUEST AUDIT: {method} {path} - Host: {request.headers.get('host')}")
+    response = await call_next(request)
     return response
 
 # 🛡️ Final Polish: Global Transaction Safety & Telemetry Middleware
