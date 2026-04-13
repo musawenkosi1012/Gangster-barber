@@ -1,7 +1,7 @@
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
-from ...models.crm import Customer
+from ..models.crm import Customer
 
 class CustomerRepository:
     """Enterprise Persistence Layer for CRM and Identity Insights."""

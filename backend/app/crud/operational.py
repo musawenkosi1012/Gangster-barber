@@ -1,6 +1,7 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from ...models.operational import BlockedSlot, Notification, SystemAlert
+from ..models.operational import BlockedSlot
+from ..models.technical import Notification
 from datetime import date
 
 class OperationalRepository:

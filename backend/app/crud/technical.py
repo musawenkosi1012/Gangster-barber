@@ -1,6 +1,6 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from ...models.technical import AuditLog, SystemAlert
+from ..models.technical import AuditLog, SystemAlert
 
 class TechnicalRepository:
     """Enterprise Persistence Layer for Audit Logs and System Health Telemetry."""

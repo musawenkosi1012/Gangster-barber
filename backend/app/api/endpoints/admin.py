@@ -161,7 +161,7 @@ def block_slot(req: BlockedSlotCreate, db: Session = Depends(get_db)) -> Blocked
         db.rollback()
         raise HTTPException(status_code=500, detail="Database lock failure on slot segment")
 
-@router.get("/notifications/critical")
+@router.get("/notifications/critical", response_model=None)
 def get_critical_notifications(db: Session = Depends(get_db)) -> List[Notification]:
     """Operational Signals: Fetches all unresolved high-priority incidents."""
     return operational_crud.list_critical_notifications(db)
@@ -179,7 +179,7 @@ def resolve_notification(notif_id: int, db: Session = Depends(get_db)) -> Dict[s
             raise HTTPException(status_code=500, detail="State persistence failure")
     raise HTTPException(status_code=404, detail="Notification not found")
 
-@router.get("/ledger")
+@router.get("/ledger", response_model=None)
 def get_admin_ledger(status: Optional[str] = None, search: Optional[str] = None, db: Session = Depends(get_db)) -> List[PaymentTransaction]:
     """The Professional Ledger: Filterable chronological history of all payment attempts."""
     return booking_crud.list_ledger(db, status, search)

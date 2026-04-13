@@ -23,13 +23,12 @@ class StorageService:
                 base_url=f"{settings.SUPABASE_URL}/storage/v1",
                 headers={"Authorization": f"Bearer {settings.SUPABASE_KEY}", "apikey": settings.SUPABASE_KEY}
             )
-        
-        if not self.provider:
-            # Shift-Left Protocol: Fail fast rather than writing to local disk
-            raise RuntimeError("CRITICAL STORAGE FAILURE: No Cloud Asset Provider (Cloudinary/Supabase) configured.")
+        # provider=None is allowed at init; upload_file raises if called without a provider
 
     async def upload_file(self, file: UploadFile, folder: str = "general") -> str:
         """Atomic transfer of binary data to the cloud with strict policing."""
+        if not self.provider:
+            raise RuntimeError("CRITICAL STORAGE FAILURE: No Cloud Asset Provider (CLOUDINARY_URL or SUPABASE_KEY) configured.")
         # Payload Policing: 5MB limit
         if file.size > 5 * 1024 * 1024:
             raise RuntimeError(f"ASSET_VIOLATION: {file.filename} exceeds 5MB limit")
