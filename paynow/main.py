@@ -38,5 +38,6 @@ app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 
 
 @app.get("/")
+@app.get("/api/payments/health")
 def health():
     return {"status": "online", "service": "Gangster Barber PayNow Service v1"}
