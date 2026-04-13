@@ -13,10 +13,10 @@ import time
 # IT Dashboard is strictly gated for admin, it_admin and owner roles
 router = APIRouter(prefix="/api/v1/it", dependencies=[Depends(require_role(["admin", "it_admin", "owner"]))])
 
-@router.get("/security/audit-logs")
+@router.get("/security/audit-logs", response_model=None)
 def get_audit_logs(
-    db: Session = Depends(get_db), 
-    limit: int = 50, 
+    db: Session = Depends(get_db),
+    limit: int = 50,
     offset: int = 0
 ) -> List[AuditLog]:
     """A stream of who changed what across the entire operational environment."""
