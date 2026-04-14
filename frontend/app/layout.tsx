@@ -133,8 +133,8 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 
         <ClerkProvider
           publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY!}
-          afterSignUpUrl="/onboarding"
-          afterSignInUrl="/book"
+          signUpForceRedirectUrl="/onboarding"
+          signInFallbackRedirectUrl="/book"
           appearance={{
             baseTheme: dark,
             variables: {
