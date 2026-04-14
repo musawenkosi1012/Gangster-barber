@@ -110,6 +110,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} ${playfair.variable}`} suppressHydrationWarning>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://www.googletagmanager.com" />
+        <link rel="dns-prefetch" href="https://adapted-tahr-3.clerk.accounts.dev" />
+        <link rel="dns-prefetch" href="https://gangster-barber-backend.vercel.app" />
+      </head>
       <body className="text-white selection:bg-red-600 selection:text-white" suppressHydrationWarning>
         {/* Google Tag Manager (noscript) */}
         <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-TJFP77LS" height="0" width="0" style={{display:'none',visibility:'hidden'}}></iframe></noscript>
