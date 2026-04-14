@@ -1,8 +1,12 @@
+"use client";
+
 import React from "react";
 import Link from "next/link";
 import { BRAND } from "@/utils/constants";
+import { useLegal } from "@/context/LegalContext";
 
 export default function Footer() {
+  const { openVault } = useLegal();
   return (
     <footer className="bg-[#050505] pt-24 pb-10 px-6 md:px-10 text-[#555] text-[10px] font-bold leading-loose uppercase tracking-[0.3em] border-t border-white/5 relative z-10">
       <div className="max-w-6xl mx-auto border-b border-white/5 pb-16 mb-12 flex flex-col md:flex-row justify-between items-start gap-12">
@@ -39,10 +43,26 @@ export default function Footer() {
         </div>
       </div>
 
-      {/* Copyright */}
+      {/* Copyright + Legal */}
       <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <span>&copy; {new Date().getFullYear()} Gangster Barber</span>
-        <a href="#hero" className="text-white hover:text-red-600 transition">Back to Top &uarr;</a>
+        <div className="flex items-center gap-6">
+          <button
+            onClick={() => openVault("privacy")}
+            className="hover:text-red-600 transition-colors"
+          >
+            Privacy Policy
+          </button>
+          <span className="text-white/10">·</span>
+          <button
+            onClick={() => openVault("terms")}
+            className="hover:text-red-600 transition-colors"
+          >
+            Terms of Service
+          </button>
+          <span className="text-white/10">·</span>
+          <a href="#hero" className="text-white hover:text-red-600 transition">Back to Top &uarr;</a>
+        </div>
       </div>
 
       {/* Developer Signature */}

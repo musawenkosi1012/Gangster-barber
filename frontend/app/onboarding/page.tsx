@@ -4,12 +4,17 @@ import React, { useState, useEffect, useRef } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { syndicateFetch } from "@/utils/api";
+import { SpringToggle } from "@/components/legal/SpringToggle";
+import { useLegal } from "@/context/LegalContext";
+import { LEGAL_VERSION } from "@/components/legal/PolicyVault";
 
 export default function OnboardingPage() {
   const { isLoaded, isSignedIn, user } = useUser();
   const router = useRouter();
 
+  const { openVault } = useLegal();
   const [nickname, setNickname] = useState("");
+  const [agreed, setAgreed] = useState(false);
   const [status, setStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid" | "saving">("idle");
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -51,12 +56,18 @@ export default function OnboardingPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const clean = nickname.trim();
-    if (!clean || status !== "available") return;
+    if (!clean || status !== "available" || !agreed) return;
 
     setStatus("saving");
     setError(null);
     try {
-      await user!.update({ unsafeMetadata: { barberName: clean } });
+      await user!.update({
+        unsafeMetadata: {
+          barberName: clean,
+          legal_consent_timestamp: new Date().toISOString(),
+          legal_version_accepted: LEGAL_VERSION,
+        }
+      });
       router.replace("/book");
     } catch (err: any) {
       setError("Failed to save. Try again.");
@@ -130,16 +141,45 @@ export default function OnboardingPage() {
               <p className="text-[10px] font-black text-red-500 uppercase tracking-widest">{error}</p>
             )}
 
+            {/* ── Consent Gate ── */}
+            <div className="pt-4 pb-2">
+              <SpringToggle
+                checked={agreed}
+                onChange={setAgreed}
+                id="onboarding-consent"
+                label={
+                  <p className="text-[10px] text-white/40 leading-relaxed font-medium">
+                    By joining the crew, you agree to our{" "}
+                    <button
+                      type="button"
+                      onClick={() => openVault("terms")}
+                      className="text-red-600 hover:text-red-400 underline underline-offset-2 transition-colors"
+                    >
+                      House Rules
+                    </button>{" "}
+                    and how we handle your data{" "}
+                    <button
+                      type="button"
+                      onClick={() => openVault("privacy")}
+                      className="text-red-600 hover:text-red-400 underline underline-offset-2 transition-colors"
+                    >
+                      (Privacy Policy)
+                    </button>.
+                  </p>
+                }
+              />
+            </div>
+
             <button
               type="submit"
-              disabled={status !== "available"}
+              disabled={status !== "available" || !agreed}
               className={`w-full py-5 text-[10px] font-black uppercase tracking-[0.3em] rounded-3xl transition-all ${
-                status === "available"
+                status === "available" && agreed
                   ? "bg-white text-black hover:bg-red-600 hover:text-white shadow-xl"
                   : "bg-white/5 text-white/20 cursor-not-allowed"
               }`}
             >
-              {status === "saving" ? "Locking In..." : "Claim This Name"}
+              {status === "saving" ? "Locking In..." : !agreed ? "Flip the Switch to Continue" : "Claim This Name"}
             </button>
           </form>
         </div>

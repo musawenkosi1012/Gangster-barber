@@ -102,6 +102,9 @@ import Script from "next/script";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { LocalBusinessSchema } from "@/components/seo/Schema";
+import { LegalProvider } from "@/context/LegalContext";
+import { PolicyVault } from "@/components/legal/PolicyVault";
+import { CookieOrchestrator } from "@/components/legal/CookieOrchestrator";
 
 export default function RootLayout({
   children,
@@ -161,9 +164,13 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
           }}
           unsafe_disableDevelopmentModeConsoleWarning
         >
-          <div className="grain"></div>
-          <LocalBusinessSchema />
-          {children}
+          <LegalProvider>
+            <div className="grain"></div>
+            <LocalBusinessSchema />
+            {children}
+            <PolicyVault />
+            <CookieOrchestrator />
+          </LegalProvider>
         </ClerkProvider>
 
       </body>

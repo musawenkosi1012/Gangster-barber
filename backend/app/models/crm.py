@@ -19,6 +19,8 @@ class Customer(Base):
     no_show_count = Column(Integer, default=0)
     last_visit_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    legal_consent_timestamp = Column(DateTime(timezone=True), nullable=True)
+    legal_version_accepted = Column(String, nullable=True)
 
     # --- Relationships ---
     # We maintain virtual links to bookings and payments via Clerk ID or Phone
