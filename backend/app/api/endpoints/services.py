@@ -205,6 +205,20 @@ async def upload_multiple_service_images(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Asset logic failed: {str(e)}")
 
+@router.delete("/admin/services/{service_id}", dependencies=[Depends(require_role(["admin", "it_admin", "owner"]))])
+def delete_service(service_id: int, db: Session = Depends(get_db)) -> Dict[str, str]:
+    """Decommission a service from the inventory."""
+    svc = db.query(ServiceModel).filter(ServiceModel.id == service_id).first()
+    if not svc:
+        raise HTTPException(status_code=404, detail="Service not found")
+    try:
+        db.delete(svc)
+        db.commit()
+        return {"status": "success", "message": "Service decommissioned"}
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to decommission service")
+
 @router.delete("/admin/services/images/{image_id}", dependencies=[Depends(require_role(["admin", "it_admin", "owner"]))])
 def delete_service_image(image_id: int, db: Session = Depends(get_db)) -> Dict[str, str]:
     """Asset Recall: Removes a specific image from the portfolio registry."""

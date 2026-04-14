@@ -124,6 +124,23 @@ export default function AdminServices() {
     }
   };
 
+  const handleDeleteService = async (serviceId: number) => {
+    if (!confirm("Permanently delete this service? This cannot be undone.")) return;
+    try {
+      const token = await getToken();
+      const response = await syndicateFetch(`/api/v1/admin/services/${serviceId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.ok) {
+        setIsModalOpen(false);
+        fetchServices();
+      }
+    } catch (e) {
+      console.error("Service decommission failed:", e);
+    }
+  };
+
   const handleDeleteImage = async (imageId: number) => {
     if (!confirm("Are you sure you want to remove this asset?")) return;
     try {
@@ -364,6 +381,12 @@ export default function AdminServices() {
                  )}
 
                  <div className="flex gap-4 pt-8">
+                    {currentService.id && (
+                      <button
+                        onClick={() => handleDeleteService(currentService.id!)}
+                        className="px-6 py-5 border border-red-600/30 text-red-600/60 text-[10px] font-black uppercase tracking-widest rounded-3xl hover:bg-red-600/10 hover:text-red-500 transition-all"
+                      > Delete </button>
+                    )}
                     <button
                       onClick={() => { setIsModalOpen(false); setSaveError(null); }}
                       className="flex-1 py-5 border border-white/10 text-white/20 text-[10px] font-black uppercase tracking-widest rounded-3xl hover:bg-white/5 transition-all"
