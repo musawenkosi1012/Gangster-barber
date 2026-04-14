@@ -7,7 +7,7 @@ import { DashboardShell } from "@/components/admin/DashboardShell";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("http://localhost:3005"),
+  metadataBase: new URL("https://gangsterbarber.com"),
   title: "Gangster Barber Admin",
   description: "Tactical Control Terminal for Gangster Barber CRM",
 };

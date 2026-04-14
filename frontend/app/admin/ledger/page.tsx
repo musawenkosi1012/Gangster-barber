@@ -23,6 +23,7 @@ export default function AdminLedger() {
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [matchingBookingId, setMatchingBookingId] = useState("");
   const [isMatching, setIsMatching] = useState(false);
+  const [matchError, setMatchError] = useState<string | null>(null);
 
   const fetchLedger = useCallback(async () => {
     setIsLoading(true);
@@ -48,6 +49,7 @@ export default function AdminLedger() {
   const handleMatch = async () => {
     if (!selectedTx || !matchingBookingId) return;
     setIsMatching(true);
+    setMatchError(null);
     try {
       const token = await getToken();
       const response = await syndicateFetch(`/api/v1/admin/ledger/${selectedTx.id}/match?booking_id=${matchingBookingId}`, {
@@ -58,9 +60,11 @@ export default function AdminLedger() {
         setSelectedTx(null);
         setMatchingBookingId("");
         fetchLedger();
+      } else {
+        setMatchError("Match failed — check the booking ID and try again.");
       }
     } catch (e) {
-      alert("Match failed.");
+      setMatchError("Connection error. Try again.");
     } finally {
       setIsMatching(false);
     }
@@ -152,7 +156,7 @@ export default function AdminLedger() {
         <div className="fixed inset-0 z-[100] flex items-center justify-end p-6 bg-black/90 backdrop-blur-md animate-in fade-in slide-in-from-right-12 duration-500">
            <div className="bg-[#0a0a0a] border-l border-white/10 w-full max-w-xl h-full p-12 overflow-y-auto">
               <header className="mb-12">
-                 <button onClick={() => setSelectedTx(null)} className="text-[10px] font-black uppercase tracking-widest text-white/20 hover:text-white mb-8 flex items-center gap-2">
+                 <button onClick={() => { setSelectedTx(null); setMatchError(null); }} className="text-[10px] font-black uppercase tracking-widest text-white/20 hover:text-white mb-8 flex items-center gap-2">
                     ← Close Terminal
                  </button>
                  <p className="text-[10px] font-black text-red-600 uppercase tracking-widest mb-1">Financial Reconciliation</p>
@@ -187,7 +191,13 @@ export default function AdminLedger() {
                        <p className="mt-4 text-[9px] font-medium text-white/40">Enter the Booking ID provided by the customer or found in the Schedule view.</p>
                     </div>
 
-                    <button 
+                    {matchError && (
+                      <div className="flex items-center gap-3 p-4 bg-red-600/10 border border-red-600/20 rounded-2xl">
+                        <span className="text-red-500 text-sm">✗</span>
+                        <span className="text-[9px] font-black text-red-400 uppercase tracking-widest">{matchError}</span>
+                      </div>
+                    )}
+                    <button
                       onClick={handleMatch}
                       disabled={isMatching || !matchingBookingId}
                       className="w-full py-5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-emerald-500 transition-all disabled:opacity-50 disabled:grayscale"
