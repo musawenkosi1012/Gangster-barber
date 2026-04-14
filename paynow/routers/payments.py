@@ -1,8 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 import logging
 import hashlib
 import os
@@ -14,8 +12,23 @@ from schemas import InitiatePaymentRequest, PaymentResponse, CheckStatusRequest,
 router = APIRouter()
 logger = logging.getLogger("paynow")
 
-# ── Rate Limiter (Fix 12) ────────────────────────────────────────────────────
-limiter = Limiter(key_func=get_remote_address)
+# ── Rate Limiter (graceful — disabled if slowapi unavailable) ────────────────
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    limiter = Limiter(key_func=get_remote_address)
+    _has_limiter = True
+except ImportError:
+    limiter = None
+    _has_limiter = False
+
+def _rate_limit(rule: str):
+    """No-op decorator when slowapi is unavailable."""
+    def decorator(fn):
+        if _has_limiter and limiter:
+            return limiter.limit(rule)(fn)
+        return fn
+    return decorator
 
 # ── Shared-secret auth for /initiate (Fix 4) ────────────────────────────────
 INTERNAL_SECRET = os.getenv("INTERNAL_API_SECRET", "")
@@ -147,7 +160,7 @@ async def paynow_webhook(request: Request):
 
 
 @router.post("/initiate", response_model=PaymentResponse)
-@limiter.limit("5/minute")
+@_rate_limit("5/minute")
 async def initiate_payment(
     request: Request,
     req: InitiatePaymentRequest,
