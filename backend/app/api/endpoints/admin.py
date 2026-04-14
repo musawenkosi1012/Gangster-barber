@@ -9,6 +9,8 @@ from ...schemas.operational import AdminStats, BlockedSlotCreate, BlockedSlot as
 from ...crud.booking import booking_crud
 from ...crud.service import service_crud
 from ...crud.operational import operational_crud
+from ...crud.customer import customer_crud
+from ...models.crm import Customer as CustomerModel
 from ...services.scheduler import scheduler
 from ...services.health import health_service
 from ..deps import get_current_admin
@@ -217,6 +219,37 @@ def match_transaction(tx_id: int, booking_id: int, db: Session = Depends(get_db)
     except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Manual reconciliation handshake failed")
+
+@router.post("/crm/backfill")
+def backfill_customers_from_bookings(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """
+    One-time backfill: creates Customer records for all existing bookings
+    that don't have a matching customer entry yet.
+    """
+    from datetime import datetime, timezone
+    bookings = db.query(Booking).filter(Booking.user_id.isnot(None)).all()
+    created = 0
+    updated = 0
+    for b in bookings:
+        existing = db.query(CustomerModel).filter(CustomerModel.clerk_id == b.user_id).first()
+        if not existing:
+            db.add(CustomerModel(
+                clerk_id=b.user_id,
+                full_name=b.name,
+                status="active",
+                booking_count=1,
+                last_visit_at=b.booking_date if b.booking_date else datetime.now(timezone.utc),
+            ))
+            created += 1
+        else:
+            existing.booking_count = (existing.booking_count or 0) + 1
+            updated += 1
+    try:
+        db.commit()
+        return {"created": created, "updated": updated, "total_bookings": len(bookings)}
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Backfill failed")
 
 @router.delete("/slots/unblock/{block_id}")
 def unblock_slot(block_id: int, db: Session = Depends(get_db)) -> Dict[str, str]:

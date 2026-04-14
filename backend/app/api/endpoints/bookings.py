@@ -9,6 +9,7 @@ from ...db.base import get_db
 from ...models import Booking, PaymentTransaction, AuditLog
 from ..deps import get_current_user
 from ...crud.booking import booking_crud
+from ...crud.customer import customer_crud
 from ...core.limiter import limiter
 from datetime import date, datetime
 from typing import List, Optional, Annotated
@@ -84,6 +85,12 @@ def create_booking(req: BookingCreate, db: db_dependency, request: Request, user
             metadata_json={"service": req.service, "date": str(booking_date), "slot": slot}
         )
         db.add(audit)
+
+        # CRM Sync: Upsert customer record so the admin CRM is always populated
+        try:
+            customer_crud.upsert_from_booking(db, clerk_id=req.user_id, name=req.name)
+        except Exception:
+            pass  # Non-critical — never fail a booking because of CRM sync
 
         try:
             db.commit()

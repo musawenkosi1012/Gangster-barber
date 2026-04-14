@@ -11,6 +11,31 @@ class CustomerRepository:
         return db.query(Customer).filter(Customer.id == customer_id).first()
 
     @staticmethod
+    def upsert_from_booking(db: Session, clerk_id: str, name: str) -> Customer:
+        """
+        Ensures a Customer record exists for a booker.
+        Looks up by clerk_id first, then falls back to name.
+        Updates booking_count and last_visit_at on every call.
+        """
+        from datetime import datetime, timezone
+        customer = db.query(Customer).filter(Customer.clerk_id == clerk_id).first()
+        if not customer:
+            customer = Customer(
+                clerk_id=clerk_id,
+                full_name=name,
+                status="active",
+                booking_count=1,
+                last_visit_at=datetime.now(timezone.utc),
+            )
+            db.add(customer)
+        else:
+            customer.booking_count = (customer.booking_count or 0) + 1
+            customer.last_visit_at = datetime.now(timezone.utc)
+            if name and customer.full_name != name:
+                customer.full_name = name
+        return customer
+
+    @staticmethod
     def search(db: Session, term: Optional[str] = None, sort_by: str = "last_visit_at") -> List[Customer]:
         query = db.query(Customer)
         if term:
