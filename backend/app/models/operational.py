@@ -11,6 +11,7 @@ class Service(Base):
     slug = Column(String, unique=True, index=True)
     description = Column(String, nullable=True)
     price = Column(Float, nullable=False)
+    booking_fee = Column(Float, nullable=True, default=0.0)
     duration_minutes = Column(Integer, default=40)
     # image_url decommissioned in favor of multi-asset images relationship
     is_active = Column(Boolean, default=True)

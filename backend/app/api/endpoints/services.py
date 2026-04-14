@@ -42,6 +42,7 @@ def list_admin_services(
 async def create_service_unified(
     name: str = Form(...),
     price: float = Form(...),
+    booking_fee: Optional[float] = Form(0.0),
     duration_minutes: int = Form(40),
     description: Optional[str] = Form(None),
     is_active: bool = Form(True),
@@ -66,7 +67,7 @@ async def create_service_unified(
     try:
         db_service = service_crud.create_service(
             db,
-            name=name, price=price, duration_minutes=duration_minutes,
+            name=name, price=price, booking_fee=booking_fee, duration_minutes=duration_minutes,
             description=description, is_active=is_active, sort_order=sort_order,
             category=category, slug=slug
         )
@@ -106,6 +107,7 @@ async def update_service_unified(
     service_id: int,
     name: Optional[str] = Form(None),
     price: Optional[float] = Form(None),
+    booking_fee: Optional[float] = Form(None),
     duration_minutes: Optional[int] = Form(None),
     description: Optional[str] = Form(None),
     is_active: Optional[bool] = Form(None),
@@ -124,6 +126,7 @@ async def update_service_unified(
             db_service.name = name
             db_service.slug = generate_slug(name)
         if price is not None: db_service.price = price
+        if booking_fee is not None: db_service.booking_fee = booking_fee
         if duration_minutes is not None: db_service.duration_minutes = duration_minutes
         if description is not None: db_service.description = description
         if is_active is not None: db_service.is_active = is_active

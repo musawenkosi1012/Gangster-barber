@@ -7,6 +7,7 @@ class ServiceBase(BaseModel):
     slug: Optional[str] = None
     description: Optional[str] = None
     price: float
+    booking_fee: Optional[float] = 0.0
     duration_minutes: Optional[int] = 40
     # image_url decommissioned
     is_active: Optional[bool] = True
