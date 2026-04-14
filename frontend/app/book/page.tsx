@@ -131,28 +131,11 @@ const buildPaymentPayload = (
   return payload;
 };
 
-const handlePaynowAction = (payData: any): boolean => {
-  if (!payData.success) {
-    alert(`Payment Failed: ${payData.error}`);
-    return false;
-  }
-
-  if (payData.redirect_url) {
-    globalThis.window.location.href = payData.redirect_url;
-    return true;
-  }
-
-  let message = "Processing Payment...";
-  if (payData.authorization_code) {
-    message = `InnBucks Code: ${payData.authorization_code}\n\nUse this in your InnBucks app.`;
-  } else if (payData.instructions) {
-    message = payData.instructions;
-  } else if (payData.otpreference) {
-    message = `O'Mari OTP Reference: ${payData.otpreference}\nCheck phone for OTP.`;
-  }
-
-  alert(message);
-  return false;
+const buildPaymentInstructions = (payData: any): string | null => {
+  if (payData.authorization_code) return `InnBucks Code: ${payData.authorization_code} — Enter this in your InnBucks app.`;
+  if (payData.instructions) return payData.instructions;
+  if (payData.otpreference) return `O'Mari OTP Reference: ${payData.otpreference} — Check your phone for the OTP.`;
+  return null;
 };
 
 const checkActiveBookingUser = async (user: any, setSelectedDate: any, setAllocatedSlot: any, setBookingStatus: any) => {
@@ -361,6 +344,9 @@ export default function BookPage() {
   const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
   const [paymentPollUrl, setPaymentPollUrl] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [paymentInstructions, setPaymentInstructions] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -412,9 +398,12 @@ export default function BookPage() {
 
   const handleBooking = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!selectedService) return alert("Select a style first.");
-    if (bookingMode === "custom" && !selectedSlot) return alert("Select a slot.");
+    if (!selectedService) { setFormError("Select a style first."); return; }
+    if (bookingMode === "custom" && !selectedSlot) { setFormError("Select a time slot before continuing."); return; }
 
+    setFormError(null);
+    setPaymentError(null);
+    setPaymentInstructions(null);
     setBookingStatus("booking");
     try {
       const finalService = selectedService.name;
@@ -437,7 +426,7 @@ export default function BookPage() {
       const payData = await payRes.json();
 
       if (!payData.success) {
-        alert(payData.error || "Payment initiation failed. Please try again.");
+        setPaymentError(payData.error || "Payment initiation failed. Please try again.");
         setBookingStatus("idle");
         return;
       }
@@ -446,6 +435,9 @@ export default function BookPage() {
         window.location.href = payData.redirect_url;
         return;
       }
+
+      const instructions = buildPaymentInstructions(payData);
+      if (instructions) setPaymentInstructions(instructions);
 
       const pollUrl = payData.poll_url || null;
       setPaymentPollUrl(pollUrl);
@@ -535,6 +527,12 @@ export default function BookPage() {
                 <p className="text-4xl font-black tracking-tighter">{allocatedSlot}</p>
                 <p className="text-white/30 text-[10px] mt-2 uppercase tracking-widest">{selectedDate}</p>
               </div>
+              {paymentInstructions && (
+                <div className="w-full bg-amber-500/10 border border-amber-500/20 rounded-2xl p-5">
+                  <p className="text-[9px] font-black uppercase tracking-[0.3em] text-amber-400 mb-2">Payment Instructions</p>
+                  <p className="text-sm font-bold text-white/80 leading-relaxed">{paymentInstructions}</p>
+                </div>
+              )}
               <p className="text-[9px] text-white/20 uppercase tracking-widest">This page will update automatically once payment is confirmed</p>
             </div>
           ) : bookingStatus === "verifying" ? (
@@ -693,6 +691,18 @@ export default function BookPage() {
                       </div>
                    </div>
 
+                   {formError && (
+                     <div className="flex items-center gap-3 p-4 bg-red-600/10 border border-red-600/30 rounded-2xl">
+                       <span className="text-red-500 text-lg">⚠</span>
+                       <p className="text-[10px] font-black uppercase tracking-widest text-red-400">{formError}</p>
+                     </div>
+                   )}
+                   {paymentError && (
+                     <div className="flex items-center gap-3 p-4 bg-red-600/10 border border-red-600/30 rounded-2xl">
+                       <span className="text-red-500 text-lg">✗</span>
+                       <p className="text-[10px] font-black uppercase tracking-widest text-red-400">{paymentError}</p>
+                     </div>
+                   )}
                    <button disabled={bookingStatus==="booking" || (bookingMode==="custom" && !selectedSlot)} type="submit" className="btn-booking w-full text-xs flex items-center justify-center gap-3">
                       {bookingStatus === "booking" ? "Processing..." : (selectedSlot ? `Secure ${selectedSlot} Slot` : "Confirm & Pay")}
                    </button>
