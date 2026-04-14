@@ -11,7 +11,7 @@ from .api.endpoints.bookings import router as bookings_router
 from .api.endpoints.admin import router as admin_router
 from .api.endpoints.it import router as it_router
 from .api.endpoints.auth import router as auth_router
-from .api.endpoints.crm import router as crm_router
+from .api.endpoints.crm import router as crm_router, public_router as crm_public_router
 from .api.endpoints.services import router as services_router
 from .api.endpoints.health import router as health_router
 from .core.config import settings
@@ -51,6 +51,7 @@ from fastapi.staticfiles import StaticFiles
 # Connect Routers
 app.include_router(bookings_router, prefix="/api/book", tags=["Bookings"])
 app.include_router(crm_router, tags=["Customer CRM"])
+app.include_router(crm_public_router, tags=["CRM Public"])
 app.include_router(services_router, prefix="/api/v1", tags=["Catalog"])
 app.include_router(admin_router, tags=["Admin Operations"]) 
 app.include_router(it_router, tags=["IT Operations"])

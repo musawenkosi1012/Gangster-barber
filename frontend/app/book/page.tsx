@@ -380,7 +380,8 @@ export default function BookPage() {
 
   useEffect(() => {
     if (user) {
-      if (!formData.name) setFormData(prev => ({ ...prev, name: `${user.firstName || ""} ${user.lastName || ""}`.trim() }));
+      const barberName = (user.unsafeMetadata as any)?.barberName || `${user.firstName || ""} ${user.lastName || ""}`.trim();
+      if (!formData.name) setFormData(prev => ({ ...prev, name: barberName }));
       checkActiveBookingUser(user, setSelectedDate, setAllocatedSlot, setBookingStatus);
     }
   }, [user]);

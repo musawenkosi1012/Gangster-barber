@@ -15,6 +15,20 @@ from ..deps import get_current_admin, require_role
 
 router = APIRouter(prefix="/api/v1/admin/customers", tags=["CRM"])
 
+public_router = APIRouter(prefix="/api/v1", tags=["CRM Public"])
+
+@public_router.get("/check-nickname")
+def check_nickname(name: str = Query(..., min_length=2, max_length=40), db: Session = Depends(get_db)) -> dict:
+    """Returns whether a nickname is already taken in the customers table."""
+    import re
+    clean = name.strip()
+    if not re.match(r"^[a-zA-Z0-9 '_\-\.]{2,40}$", clean):
+        return {"available": False, "reason": "invalid"}
+    exists = db.query(CustomerModel).filter(
+        func.lower(CustomerModel.full_name) == clean.lower()
+    ).first()
+    return {"available": exists is None}
+
 @router.get("/", response_model=List[Customer])
 def list_customers(
     search: Optional[str] = None,
