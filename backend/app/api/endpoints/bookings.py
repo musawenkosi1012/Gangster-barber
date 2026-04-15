@@ -62,6 +62,8 @@ def create_booking(req: BookingCreate, db: db_dependency, request: Request, user
         slot = allocation["time"]
         booking_date = allocation["date"]
     
+    is_cash = req.payment_method in (None, "CASH", "cash")
+
     # Create the ORM model instance
     new_booking = Booking(
         name=req.name,
@@ -69,20 +71,39 @@ def create_booking(req: BookingCreate, db: db_dependency, request: Request, user
         user_id=req.user_id,
         slot_time=slot,
         booking_date=booking_date,
-        status="PENDING" if req.payment_method != "CASH" else "CONFIRMED"
+        status="CONFIRMED" if is_cash else "PENDING"
     )
-    
+
     try:
         db.add(new_booking)
         db.flush() # Get the ID before commit
-        
-        # 2. Record in Audit Log
+
+        # Create PaymentTransaction for all non-cash bookings so the ledger,
+        # payment-status poll, and confirm webhook all have a record to work with.
+        if not is_cash and req.payment_amount:
+            transaction = PaymentTransaction(
+                booking_id=new_booking.id,
+                amount=req.payment_amount,
+                currency="USD",
+                provider=req.payment_method,
+                status="pending",
+                poll_url=req.poll_url,
+                metadata_json={
+                    "service": req.service,
+                    "date": str(booking_date),
+                    "slot": slot,
+                    "initiated_by": req.user_id,
+                }
+            )
+            db.add(transaction)
+
+        # Record in Audit Log
         audit = AuditLog(
             actor_id=req.user_id,
             role="customer",
             action="CREATE_BOOKING",
             resource_id=str(new_booking.id),
-            metadata_json={"service": req.service, "date": str(booking_date), "slot": slot}
+            metadata_json={"service": req.service, "date": str(booking_date), "slot": slot, "payment_method": req.payment_method}
         )
         db.add(audit)
 
@@ -306,9 +327,29 @@ def confirm_booking(booking_id: int, request: Request, db: db_dependency) -> dic
     booking = booking_crud.get_by_id(db, booking_id)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
-    
+
     try:
         booking.status = "CONFIRMED"
+
+        # Update the PaymentTransaction so the ledger reflects the completed payment
+        transaction = booking_crud.get_latest_transaction(db, booking_id)
+        if transaction:
+            transaction.status = "completed"
+
+        # Audit the confirmation
+        audit = AuditLog(
+            actor_id=booking.user_id,
+            role="system",
+            action="PAYMENT_CONFIRMED",
+            resource_id=str(booking_id),
+            metadata_json={
+                "provider": transaction.provider if transaction else None,
+                "amount": transaction.amount if transaction else None,
+                "provider_ref": transaction.provider_ref if transaction else None,
+            }
+        )
+        db.add(audit)
+
         db.commit()
         return {"status": "CONFIRMED", "booking_id": booking_id}
     except SQLAlchemyError:

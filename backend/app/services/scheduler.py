@@ -27,9 +27,12 @@ class SchedulerService:
 
     def get_booked_times(self, db: Session, target_date: date) -> List[time]:
         """Returns a list of already booked or manually blocked times for a specific date."""
-        bookings = db.query(Booking).filter(Booking.booking_date == target_date).all()
+        bookings = db.query(Booking).filter(
+            Booking.booking_date == target_date,
+            Booking.status.notin_(["CANCELLED", "REJECTED"])
+        ).all()
         blocks = db.query(BlockedSlot).filter(BlockedSlot.date == target_date).all()
-        
+
         booked_times = []
         # Parse active bookings
         for b in bookings:
