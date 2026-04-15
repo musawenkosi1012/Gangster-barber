@@ -4,16 +4,29 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
-  title: "Barber Services & Prices | Gangster Barber Gweru",
-  description: "Taper fades, lineups, beard sculpts & full grooming packages from $2. Best barber services in Gweru, Zimbabwe. Walk-ins welcome, book online.",
+  title: "Barber Services & Prices in Gweru",
+  description: "Taper fades, lineups, beard sculpts & full grooming packages from $2. Best barber in Gweru, Senga & Nehosho. Walk-ins welcome. Book online today.",
+  keywords: [
+    "barber services Gweru",
+    "taper fade Gweru",
+    "haircut prices Gweru",
+    "lineup Gweru",
+    "beard sculpt Gweru",
+    "skin fade Gweru",
+    "barber shop Gweru Zimbabwe",
+    "cheap haircut Gweru",
+    "barber Senga Gweru",
+    "barber Nehosho Gweru",
+  ],
   alternates: {
     canonical: "https://gangsterbarber.com/services",
   },
   openGraph: {
     title: "Barber Services & Prices | Gangster Barber Gweru",
-    description: "Taper fades, lineups, beard sculpts & full grooming packages from $2. Best barber services in Gweru, Zimbabwe.",
+    description: "Taper fades, lineups, beard sculpts & full grooming from $2. Best barber in Gweru, Zimbabwe. Walk-ins welcome.",
     url: "https://gangsterbarber.com/services",
     type: "website",
+    images: [{ url: "/logo.png", width: 500, height: 500, alt: "Gangster Barber Gweru — Services & Prices" }],
   },
 };
 
