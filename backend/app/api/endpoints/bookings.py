@@ -33,6 +33,7 @@ class PaymentStatusResponse(BaseModel):
     409: {"description": "Double booking detected"},
     500: {"description": "Internal database error"}
 })
+@router.post("", response_model=BookingSchema, include_in_schema=False)
 @limiter.limit("5/minute")
 def create_booking(req: BookingCreate, db: db_dependency, request: Request, user: dict = Depends(get_current_user)) -> Booking:
     # Identity Guard: Ensure user can only book for themselves
