@@ -7,6 +7,7 @@ from ...schemas.booking import BookingCreate, Booking as BookingSchema, BookingU
 from ...services.scheduler import scheduler
 from ...db.base import get_db
 from ...models import Booking, PaymentTransaction, AuditLog
+from ...models.operational import Service
 from ..deps import get_current_user
 from ...crud.booking import booking_crud
 from ...crud.customer import customer_crud
@@ -65,6 +66,31 @@ def create_booking(req: BookingCreate, db: db_dependency, request: Request, user
     
     is_cash = req.payment_method in (None, "CASH", "cash")
 
+    # CRIT-1: Server-side price enforcement — look up the canonical booking_fee from
+    # the services table and use that as the authoritative charge amount.
+    # Clients can no longer inject arbitrary prices; the server always dictates the amount.
+    canonical_amount: float = 0.0
+    if not is_cash:
+        service_record = db.query(Service).filter(
+            Service.name.ilike(req.service),
+            Service.is_active == True
+        ).first()
+
+        if not service_record:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown or inactive service: '{req.service}'. Cannot determine price."
+            )
+
+        # booking_fee is the deposit amount; fall back to full service price if not set
+        canonical_amount = service_record.booking_fee or service_record.price or 0.0
+
+        if canonical_amount <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Service has no configured price. Contact support."
+            )
+
     # CRIT-2: Zero-dollar guard — non-cash bookings must have a positive amount.
     # Python treats 0.0 as falsy, so `if req.payment_amount` alone silently skips
     # PaymentTransaction creation, leaving a PENDING slot reserved at zero cost.
@@ -91,10 +117,11 @@ def create_booking(req: BookingCreate, db: db_dependency, request: Request, user
 
         # Create PaymentTransaction for all non-cash bookings so the ledger,
         # payment-status poll, and confirm webhook all have a record to work with.
-        if not is_cash and req.payment_amount:
+        # CRIT-1: Use canonical_amount (server-side validated price) — never trust req.payment_amount
+        if not is_cash and canonical_amount:
             transaction = PaymentTransaction(
                 booking_id=new_booking.id,
-                amount=req.payment_amount,
+                amount=canonical_amount,
                 currency="USD",
                 provider=req.payment_method,
                 status="pending",

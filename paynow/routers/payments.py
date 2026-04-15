@@ -45,7 +45,11 @@ async def verify_request_auth(
     Falls back gracefully if the secret is not configured (dev mode).
     """
     if not INTERNAL_SECRET:
-        # Secret not configured — warn but allow (for dev/initial deploy)
+        # HIGH-3: Hard fail in production — never allow unauthenticated access to /initiate on live deployments
+        env = os.getenv("APP_ENV", "development")
+        if env == "production":
+            logger.error("CRITICAL: INTERNAL_API_SECRET is not set in production. Blocking all /initiate requests.")
+            raise HTTPException(status_code=500, detail="Service misconfiguration. Contact support.")
         logger.warning("INTERNAL_API_SECRET not set — /initiate is unauthenticated. Set this env var in production.")
         return True
 
@@ -144,7 +148,8 @@ async def paynow_webhook(request: Request):
                             )
                             if check.status_code == 200:
                                 check_data = check.json()
-                                if check_data.get("paid"):
+                                # CRIT-3: The payment-status endpoint returns {"status": "PAID"}, not {"paid": true}
+                                if check_data.get("status") == "PAID":
                                     logger.info(f"⏭️ Booking {booking_id} already confirmed — skipping duplicate webhook.")
                                     return {"status": "already_processed", "reference": booking_id}
                     except Exception as e:

@@ -415,12 +415,38 @@ export default function BookPage() {
         ? BOOKING_DEPOSIT + (selectedService?.price || 0)
         : BOOKING_DEPOSIT;
 
+      // HIGH-2: Create the booking FIRST so the slot is reserved and we have a real
+      // integer booking ID to use as the Paynow reference. Previously, payment was
+      // initiated before the booking existed — if booking creation failed after a
+      // successful payment, the user was charged with no booking in the system.
+      const token = await getToken();
+      const bookRes = await syndicateFetch("/api/book/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          ...formData,
+          service: finalService,
+          user_id: user?.id || "guest",
+          slot_time: bookingMode === "custom" ? selectedSlot : null,
+          booking_date: selectedDate,
+          payment_method: paymentMethod,
+          payment_amount: payAmount,
+          poll_url: null, // poll_url will be attached after payment initiation
+        }),
+      });
+      if (!bookRes.ok) {
+        const errData = await bookRes.json().catch(() => ({}));
+        throw new Error(errData.detail || "Booking creation failed");
+      }
+      const bookData = await bookRes.json();
+
+      setPendingBookingId(bookData.id);
+      setAllocatedSlot(bookData.slot_time);
+
+      // Now initiate payment using the real booking ID as the Paynow reference.
+      // This ensures the webhook can correctly identify and confirm the booking.
       const method = paymentMethod.replace("paynow_", "");
-      const paynowRef = typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `ref-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      
-      const payPayload = buildPaymentPayload(method, paynowRef, { ...formData, service: finalService }, user, phoneNumber, payAmount);
+      const payPayload = buildPaymentPayload(method, String(bookData.id), { ...formData, service: finalService }, user, phoneNumber, payAmount);
 
       const payRes = await fetch(`/api/payments/initiate`, {
         method: "POST",
@@ -430,6 +456,11 @@ export default function BookPage() {
       const payData = await payRes.json();
 
       if (!payData.success) {
+        // Cancel the pending booking since payment failed to initiate
+        await syndicateFetch(`/api/book/${bookData.id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => { /* best-effort cleanup */ });
         setPaymentError(payData.error || "Payment initiation failed. Please try again.");
         setBookingStatus("idle");
         return;
@@ -445,27 +476,6 @@ export default function BookPage() {
 
       const pollUrl = payData.poll_url || null;
       setPaymentPollUrl(pollUrl);
-
-      const token = await getToken();
-      const bookRes = await syndicateFetch("/api/book/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          ...formData,
-          service: finalService,
-          user_id: user?.id || "guest",
-          slot_time: bookingMode === "custom" ? selectedSlot : null,
-          booking_date: selectedDate,
-          payment_method: paymentMethod,
-          payment_amount: payAmount,
-          poll_url: pollUrl,
-        }),
-      });
-      if (!bookRes.ok) throw new Error("Booking creation failed");
-      const bookData = await bookRes.json();
-
-      setPendingBookingId(bookData.id);
-      setAllocatedSlot(bookData.slot_time);
       setBookingStatus("awaiting_payment");
 
       const maxAttempts = 75;
