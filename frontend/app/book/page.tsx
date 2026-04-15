@@ -472,13 +472,13 @@ export default function BookPage() {
           const statusRes = await syndicateFetch(`/api/book/${bookData.id}/payment-status`);
           const statusData = await statusRes.json();
 
-          if (statusData.paid) {
+          if (statusData.status === "PAID") {
             clearInterval(poll);
             setBookingStatus("success");
             return;
           }
 
-          if (statusData.payment_status === "failed") {
+          if (statusData.status === "REJECTED" || statusData.status === "EXPIRED") {
             clearInterval(poll);
             setBookingStatus("payment_failed");
             return;

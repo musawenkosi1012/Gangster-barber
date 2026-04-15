@@ -32,7 +32,7 @@ if settings.DATABASE_URL and "supabase" in settings.DATABASE_URL:
     )
 
 # 🚀 Production Protection Suite: Rate Limiting
-app = FastAPI(title=settings.APP_NAME)
+app = FastAPI(title=settings.APP_NAME, redirect_slashes=False)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
