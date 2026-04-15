@@ -8,7 +8,7 @@ export const BRAND = {
     whatsapp: "263785139533"
   },
   financials: {
-    bookingFee: 2,
+    bookingFee: 0.10,
     currency: "USD"
   }
 };
