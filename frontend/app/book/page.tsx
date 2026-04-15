@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Navbar from "@/components/Navbar";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { syndicateFetch } from "@/utils/api";
 import { transformAssetUrl } from "@/utils/cdn";
@@ -138,9 +138,11 @@ const buildPaymentInstructions = (payData: any): string | null => {
   return null;
 };
 
-const checkActiveBookingUser = async (user: any, setSelectedDate: any, setAllocatedSlot: any, setBookingStatus: any) => {
+const checkActiveBookingUser = async (user: any, token: string | null, setSelectedDate: any, setAllocatedSlot: any, setBookingStatus: any) => {
   try {
-    const response = await syndicateFetch(`/api/book/user/${user.id}`);
+    const response = await syndicateFetch(`/api/book/user/${user.id}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
     if (!response.ok) return;
     const bookings = await response.json();
     const activeBooking = bookings.find(isFutureBooking);
@@ -304,6 +306,7 @@ const STATIC_DATES = Array.from({ length: 7 }, (_, i) => {
 
 export default function BookPage() {
   const { user, isLoaded } = useUser();
+  const { getToken } = useAuth();
   const router = useRouter();
 
   const [bookingStatus, setBookingStatus] = useState<"idle" | "booking" | "awaiting_payment" | "verifying" | "payment_failed" | "success" | "error">("idle");
@@ -382,7 +385,7 @@ export default function BookPage() {
     if (user) {
       const barberName = (user.unsafeMetadata as any)?.barberName || `${user.firstName || ""} ${user.lastName || ""}`.trim();
       if (!formData.name) setFormData(prev => ({ ...prev, name: barberName }));
-      checkActiveBookingUser(user, setSelectedDate, setAllocatedSlot, setBookingStatus);
+      getToken().then(token => checkActiveBookingUser(user, token, setSelectedDate, setAllocatedSlot, setBookingStatus));
     }
   }, [user]);
 
@@ -443,9 +446,10 @@ export default function BookPage() {
       const pollUrl = payData.poll_url || null;
       setPaymentPollUrl(pollUrl);
 
+      const token = await getToken();
       const bookRes = await syndicateFetch("/api/book/", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           ...formData,
           service: finalService,
