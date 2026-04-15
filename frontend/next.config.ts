@@ -16,6 +16,21 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "images.unsplash.com",
       },
+      // Cloudinary — service image uploads
+      {
+        protocol: "https",
+        hostname: "res.cloudinary.com",
+      },
+      // Supabase Storage — service image uploads
+      {
+        protocol: "https",
+        hostname: "**.supabase.co",
+      },
+      // Supabase custom domains
+      {
+        protocol: "https",
+        hostname: "**.supabase.in",
+      },
     ],
   },
 
