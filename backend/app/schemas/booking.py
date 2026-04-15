@@ -20,8 +20,14 @@ class BookingUpdate(BaseModel):
     service: Optional[str] = None
     slot_time: Optional[str] = None
     booking_date: Optional[date] = None
-    status: Optional[str] = None
     notes: Optional[str] = None
+    # status is intentionally excluded — status transitions are controlled
+    # server-side only (payment webhook, admin actions). Customers cannot
+    # self-confirm or self-cancel via PATCH.
+
+class BookingStatusUpdate(BaseModel):
+    """Separate schema for admin-only status changes."""
+    status: str
 
 class Booking(BookingBase):
     id: int

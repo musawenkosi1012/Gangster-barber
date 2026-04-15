@@ -65,6 +65,16 @@ def create_booking(req: BookingCreate, db: db_dependency, request: Request, user
     
     is_cash = req.payment_method in (None, "CASH", "cash")
 
+    # CRIT-2: Zero-dollar guard — non-cash bookings must have a positive amount.
+    # Python treats 0.0 as falsy, so `if req.payment_amount` alone silently skips
+    # PaymentTransaction creation, leaving a PENDING slot reserved at zero cost.
+    if not is_cash:
+        if not req.payment_amount or req.payment_amount <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="A payment amount greater than zero is required for non-cash bookings."
+            )
+
     # Create the ORM model instance
     new_booking = Booking(
         name=req.name,
@@ -199,16 +209,25 @@ class PaymentVerification(BaseModel):
     provider_ref: str
 
 @router.post("/verify-payment")
-def submit_payment_reference(req: PaymentVerification, db: db_dependency) -> dict:
+def submit_payment_reference(req: PaymentVerification, db: db_dependency, user: dict = Depends(get_current_user)) -> dict:
     """
     Allows the customer to submit an EcoCash/OneMoney reference code.
     Flags the transaction for manual review in the IT Command Center.
     """
+    # CRIT-5: Ownership check — verify the caller owns this booking before
+    # accepting a payment reference. Prevents anonymous actors from injecting
+    # fake references against other users' bookings.
+    booking = booking_crud.get_by_id(db, req.booking_id)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.user_id != user.get("sub"):
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this booking")
+
     transaction = booking_crud.get_pending_transaction(db, req.booking_id)
-    
+
     if not transaction:
         raise HTTPException(status_code=404, detail="Pending transaction not found for this booking")
-    
+
     # Move to manual_review for IT/Admin verification
     transaction.provider_ref = req.provider_ref
     transaction.status = "manual_review"
@@ -242,7 +261,7 @@ def get_user_bookings(user_id: str, db: db_dependency, user: dict = Depends(get_
     return booking_crud.list_by_user(db, user_id)
 
 @router.get("/{booking_id}/payment-status", response_model=PaymentStatusResponse)
-def get_payment_status(booking_id: int, db: db_dependency) -> dict:
+def get_payment_status(booking_id: int, db: db_dependency, user: dict = Depends(get_current_user)) -> dict:
     """
     Refined Status Hub: Orchestrates the transition from PENDING to either CONFIRMED or CANCELLED
     based on the financial outcome. Fills the contract-driven intent for graceful failure.
@@ -251,6 +270,11 @@ def get_payment_status(booking_id: int, db: db_dependency) -> dict:
         booking = booking_crud.get_by_id(db, booking_id)
         if not booking:
             raise HTTPException(status_code=404, detail="Booking not found")
+
+        # CRIT-4: Ownership check — only the booking owner or admin/owner can poll payment status.
+        is_admin = user.get("metadata", {}).get("role") in ["admin", "owner"]
+        if booking.user_id != user.get("sub") and not is_admin:
+            raise HTTPException(status_code=403, detail="Forbidden: You do not own this booking")
 
         transaction = booking_crud.get_latest_transaction(db, booking_id)
 
