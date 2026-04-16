@@ -137,8 +137,8 @@ const STATIC_DATES = Array.from({ length: 7 }, (_, i) => {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 const BookingSuccessView = ({
-  selectedDate, allocatedSlot, timeLeft, images,
-}: { selectedDate: string; allocatedSlot: string; timeLeft: string; images: ServiceImage[]; }) => (
+  selectedDate, allocatedSlot, timeLeft, images, providerRef,
+}: { selectedDate: string; allocatedSlot: string; timeLeft: string; images: ServiceImage[]; providerRef?: string | null; }) => (
   <div className="text-center py-8 relative z-20">
     <div className="w-20 h-20 bg-green-500/10 border border-green-500/20 text-green-500 rounded-2xl flex items-center justify-center mx-auto mb-8 text-3xl rotate-12">✓</div>
     <h2 className="text-2xl font-black mb-4 tracking-tighter uppercase">Slot Secured</h2>
@@ -160,6 +160,12 @@ const BookingSuccessView = ({
       <p className="text-[10px] font-black uppercase tracking-[0.3em] text-red-500 mb-1">Time to Target</p>
       <p className="text-3xl font-black tracking-widest text-white tabular-nums">{timeLeft || "..."}</p>
     </div>
+    {/* Show real PayNow provider ref — only if it looks like a real ref (not a UUID) */}
+    {providerRef && !providerRef.includes("-") && (
+      <p className="text-[9px] font-black uppercase tracking-[0.3em] text-white/20 mb-6">
+        PayNow Ref: {providerRef}
+      </p>
+    )}
     <div className="flex flex-col sm:flex-row gap-4 justify-center">
       <Link href="/dashboard" className="btn-booking py-6 px-12 text-[11px]">Go to Dashboard</Link>
       <Link href="/" className="py-6 px-12 text-[11px] font-bold tracking-widest uppercase border border-white/10 rounded-full hover:bg-white hover:text-black transition-all duration-500 text-white">Home</Link>
@@ -249,6 +255,7 @@ export default function BookPage() {
   const [allocatedSlot, setAllocatedSlot] = useState<string | null>(null);
   const [confirmedDate, setConfirmedDate] = useState<string>(selectedDate);
   const [confirmedBookingId, setConfirmedBookingId] = useState<number | null>(null);
+  const [providerRef, setProviderRef] = useState<string | null>(null); // real PayNow ref shown to user
   const [timeLeft, setTimeLeft] = useState("");
 
   const [mounted, setMounted] = useState(false);
@@ -457,10 +464,12 @@ export default function BookPage() {
 
           if (statusData.status === "PAID") {
             clearInterval(pollInterval);
-            // Booking now exists in DB — store confirmed booking ID
+            // Booking now exists in DB — store confirmed details
             if (statusData.bookingId) setConfirmedBookingId(statusData.bookingId);
             if (statusData.slot_time) setAllocatedSlot(statusData.slot_time);
             if (statusData.booking_date) setConfirmedDate(statusData.booking_date);
+            // transactionRef is provider_ref (real PayNow ref) — show it to user
+            if (statusData.transactionRef) setProviderRef(statusData.transactionRef);
             // Clear sessionStorage — booking is real now
             sessionStorage.removeItem("pendingPaynowRef");
             sessionStorage.removeItem("pendingDraftToken");
@@ -582,6 +591,7 @@ export default function BookPage() {
               allocatedSlot={allocatedSlot!}
               timeLeft={timeLeft}
               images={selectedService?.images || []}
+              providerRef={providerRef}
             />
           )}
 
