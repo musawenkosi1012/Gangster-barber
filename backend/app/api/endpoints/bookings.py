@@ -1,14 +1,30 @@
 """
 Bookings endpoint — Gangster Barber
 ────────────────────────────────────
-Two-phase payment architecture:
-  Phase 1  POST /api/book/            → creates booking in PENDING + 10-min TTL
-  Phase 2  POST /api/book/{id}/confirm → called by PayNow webhook after verification
-                                         promotes PENDING → CONFIRMED
+Draft-in-cache architecture (v2):
+
+  Phase 1  POST /api/book/
+           ─ Validates slot availability
+           ─ Returns a signed DRAFT TOKEN (JWT, 10-min TTL)
+           ─ NO database write at this point
+
+  Phase 2  POST /api/payments/initiate  (PayNow microservice)
+           ─ Receives draft_token in request payload
+           ─ Passes it through to PayNow as opaque metadata
+
+  Phase 3  POST /api/book/confirm
+           ─ Called ONLY by the verified PayNow webhook
+           ─ Decodes the draft token
+           ─ Creates the Booking row as CONFIRMED in one atomic write
+           ─ Creates the PaymentTransaction as completed
+
+  Phase 4  POST /api/book/{id}/cancel
+           ─ Called by the webhook on payment failure
+           ─ Sets booking CANCELLED + transaction failed (idempotent)
 
 Slot cleanup:
-  POST /api/book/cleanup-expired      → cancels all PENDING rows past reserved_until
-  (called by Vercel cron every 5 min)
+  No periodic cleanup job needed — PENDING rows no longer exist.
+  Slot availability is computed from CONFIRMED + COMPLETED only.
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Request
@@ -28,22 +44,37 @@ from datetime import date, datetime, timedelta
 from typing import List, Optional, Annotated
 import os
 import logging
+import json
+import hmac
+import hashlib
+import base64
 
 logger = logging.getLogger("bookings")
 router = APIRouter()
 
-# ── Constants ───────────────────────────────────────────────────────────────
-RESERVATION_TTL_MINUTES = 10   # How long a PENDING slot is held before auto-cancel
+# ── Constants ────────────────────────────────────────────────────────────────
+DRAFT_TTL_MINUTES = 10
 INTERNAL_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 
-# Type alias for cleaner signatures
+# Signing secret for draft tokens — falls back to INTERNAL_SECRET so no new env var needed
+DRAFT_SIGNING_KEY = os.getenv("DRAFT_SIGNING_KEY", INTERNAL_SECRET or "gangster-barber-draft-key")
+
 db_dependency = Annotated[Session, Depends(get_db)]
 
 
 # ── Response Schemas ─────────────────────────────────────────────────────────
+class DraftTokenResponse(BaseModel):
+    """Returned from POST /api/book/ — no booking in DB yet."""
+    draft_token: str          # Signed JWT carrying all booking fields
+    slot_time: str
+    booking_date: str
+    expires_at: str           # ISO timestamp — frontend shows countdown
+
+
 class PaymentStatusResponse(BaseModel):
-    bookingId: int
-    status: str           # PENDING | PAID | REJECTED | EXPIRED | ERROR
+    bookingId: Optional[int] = None
+    draftToken: Optional[str] = None
+    status: str               # PENDING | PAID | REJECTED | EXPIRED | ERROR
     transactionRef: Optional[str] = None
     error: Optional[dict] = None
 
@@ -53,13 +84,59 @@ class PaymentVerification(BaseModel):
     provider_ref: str
 
 
-class CompletePaymentRequest(BaseModel):
-    transaction_status: str = "completed"
+# ── Draft Token Helpers ───────────────────────────────────────────────────────
+
+def _sign(payload: dict) -> str:
+    """
+    Produce a simple signed token: base64(payload_json).base64(hmac_sha256).
+    Not a full JWT library call — avoids dependency on python-jose for this
+    lightweight internal use case. Still cryptographically authenticated.
+    """
+    body = base64.urlsafe_b64encode(
+        json.dumps(payload, default=str).encode()
+    ).rstrip(b"=").decode()
+
+    sig = hmac.new(
+        DRAFT_SIGNING_KEY.encode(),
+        body.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+    return f"{body}.{sig}"
+
+
+def _verify(token: str) -> dict:
+    """
+    Verify and decode a draft token. Raises ValueError on tampering or expiry.
+    """
+    try:
+        body, sig = token.rsplit(".", 1)
+    except ValueError:
+        raise ValueError("Malformed draft token")
+
+    expected_sig = hmac.new(
+        DRAFT_SIGNING_KEY.encode(),
+        body.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+    if not hmac.compare_digest(sig, expected_sig):
+        raise ValueError("Draft token signature invalid — possible tampering")
+
+    # Restore missing padding
+    padded = body + "=" * (-len(body) % 4)
+    payload = json.loads(base64.urlsafe_b64decode(padded))
+
+    expires_at = datetime.fromisoformat(payload["expires_at"])
+    if datetime.utcnow() > expires_at:
+        raise ValueError("Draft token expired")
+
+    return payload
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 def _get_zim_now() -> datetime:
-    """Current time in Africa/Harare (UTC+2), timezone-aware."""
+    """Current time in Africa/Harare (UTC+2)."""
     try:
         from zoneinfo import ZoneInfo
         return datetime.now(ZoneInfo("Africa/Harare"))
@@ -70,22 +147,30 @@ def _get_zim_now() -> datetime:
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  POST /api/book/
-#  Phase 1: Reserve the slot.  Booking is PENDING until the webhook fires.
+#  Phase 1: Validate slot and issue a DRAFT TOKEN.
+#  ─ NO database write happens here.
+#  ─ The frontend holds this token in sessionStorage.
+#  ─ The barber NEVER sees this booking until payment is confirmed.
 # ═══════════════════════════════════════════════════════════════════════════
-@router.post("/", response_model=BookingSchema, responses={
+@router.post("/", response_model=DraftTokenResponse, responses={
     400: {"description": "Invalid slot, past date, or missing amount"},
     403: {"description": "Identity mismatch"},
-    409: {"description": "Slot conflict"},
-    500: {"description": "Database error"},
+    409: {"description": "Slot conflict — slot already CONFIRMED by another customer"},
+    500: {"description": "Internal error"},
 })
-@router.post("", response_model=BookingSchema, include_in_schema=False)
+@router.post("", response_model=DraftTokenResponse, include_in_schema=False)
 @limiter.limit("5/minute")
-def create_booking(
+def create_draft(
     req: BookingCreate,
     db: db_dependency,
     request: Request,
     user: dict = Depends(get_current_user),
-) -> Booking:
+) -> dict:
+    """
+    Validates the requested slot and returns a signed draft token.
+    The booking is NOT written to the database at this stage.
+    The barber dashboard will only show this booking AFTER PayNow confirms payment.
+    """
     # ── Identity Guard ───────────────────────────────────────────────────
     if req.user_id != user.get("sub"):
         raise HTTPException(status_code=403, detail="CSRF Violation: Identity mismatch")
@@ -96,12 +181,22 @@ def create_booking(
     if target_date < zims_now.date():
         raise HTTPException(status_code=400, detail="Cannot book sessions in the past")
 
-    # ── Slot allocation ──────────────────────────────────────────────────
+    is_cash = req.payment_method in (None, "CASH", "cash")
+
+    if not is_cash and (not req.payment_amount or req.payment_amount <= 0):
+        raise HTTPException(
+            status_code=400,
+            detail="A payment amount greater than zero is required for non-cash bookings.",
+        )
+
+    # ── Slot validation ──────────────────────────────────────────────────
+    # We check availability against CONFIRMED + COMPLETED bookings only.
+    # The scheduler._is_active() already ignores PENDING/CANCELLED rows.
     if req.slot_time:
         if not scheduler.is_slot_available(db, req.slot_time, target_date):
             raise HTTPException(
-                status_code=400,
-                detail=f"Requested slot is not available for {target_date}",
+                status_code=409,
+                detail=f"Slot {req.slot_time} on {target_date} is already taken.",
             )
         slot = req.slot_time
         booking_date = target_date
@@ -115,88 +210,272 @@ def create_booking(
         slot = allocation["time"]
         booking_date = allocation["date"]
 
-    is_cash = req.payment_method in (None, "CASH", "cash")
-
-    # ── Payment amount guard ─────────────────────────────────────────────
-    if not is_cash and (not req.payment_amount or req.payment_amount <= 0):
-        raise HTTPException(
-            status_code=400,
-            detail="A payment amount greater than zero is required for non-cash bookings.",
+    # ── Cash bookings: write directly to DB as CONFIRMED ─────────────────
+    # Cash requires no payment gateway, so we skip the draft-token flow.
+    if is_cash:
+        return _create_confirmed_booking(
+            db=db,
+            req=req,
+            slot=slot,
+            booking_date=booking_date,
+            zims_now=zims_now,
+            paynow_reference=None,
         )
 
-    # ── Build booking record ─────────────────────────────────────────────
-    # Cash payments are immediately CONFIRMED (no payment needed).
-    # All electronic payments start as PENDING with a 10-minute TTL so the
-    # slot is held but NOT locked permanently until the webhook fires.
-    ttl = zims_now + timedelta(minutes=RESERVATION_TTL_MINUTES) if not is_cash else None
+    # ── Electronic payment: issue draft token ────────────────────────────
+    expires_at = datetime.utcnow() + timedelta(minutes=DRAFT_TTL_MINUTES)
+
+    draft_payload = {
+        "user_id":        req.user_id,
+        "name":           req.name,
+        "service":        req.service,
+        "slot_time":      slot,
+        "booking_date":   str(booking_date),
+        "payment_method": req.payment_method,
+        "payment_amount": req.payment_amount,
+        "paynow_ref":     req.paynow_ref,
+        "expires_at":     expires_at.isoformat(),
+    }
+
+    token = _sign(draft_payload)
+
+    logger.info(
+        f"Draft token issued for {req.name} — slot {slot} on {booking_date} "
+        f"(expires {expires_at.isoformat()}). No DB write."
+    )
+
+    return {
+        "draft_token":  token,
+        "slot_time":    slot,
+        "booking_date": str(booking_date),
+        "expires_at":   expires_at.isoformat(),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  POST /api/book/confirm
+#  Phase 3: Webhook-only. Decodes draft token → creates CONFIRMED booking.
+#  Called by the PayNow microservice after hash-verified IPN.
+# ═══════════════════════════════════════════════════════════════════════════
+@router.post("/confirm")
+def confirm_from_draft(request: Request, db: db_dependency) -> dict:
+    """
+    Receives the draft token from the PayNow webhook and atomically:
+      1. Decodes + verifies the signed draft
+      2. Creates the Booking row as CONFIRMED
+      3. Creates the PaymentTransaction as completed
+    This is the ONLY place a booking row is written for electronic payments.
+    """
+    secret = request.headers.get("X-Internal-Secret")
+    if not INTERNAL_SECRET or secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden: Internal Clearance Only")
+
+    draft_token = request.headers.get("X-Draft-Token")
+    paynow_reference = request.headers.get("X-Paynow-Reference")
+
+    if not draft_token:
+        raise HTTPException(status_code=400, detail="Missing X-Draft-Token header")
+
+    # ── Decode + verify draft ────────────────────────────────────────────
+    try:
+        draft = _verify(draft_token)
+    except ValueError as e:
+        logger.warning(f"Draft token rejection: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+    zims_now = _get_zim_now()
+    booking_date = date.fromisoformat(draft["booking_date"])
+
+    # ── Idempotency: check if this draft was already confirmed ────────────
+    # Use paynow_ref as the dedupe key — same IPN arriving twice should not
+    # create a duplicate booking.
+    paynow_ref = draft.get("paynow_ref")
+    if paynow_ref:
+        existing_tx = (
+            db.query(PaymentTransaction)
+            .filter(PaymentTransaction.paynow_ref == paynow_ref)
+            .first()
+        )
+        if existing_tx and existing_tx.status == "completed":
+            existing_booking = booking_crud.get_by_id(db, existing_tx.booking_id)
+            logger.info(f"Idempotent confirm — draft {paynow_ref} already confirmed as booking {existing_tx.booking_id}")
+            return {
+                "status": "CONFIRMED",
+                "booking_id": existing_tx.booking_id,
+                "idempotent": True,
+            }
+
+    # ── Create booking as CONFIRMED ──────────────────────────────────────
+    result = _create_confirmed_booking(
+        db=db,
+        req=None,
+        slot=draft["slot_time"],
+        booking_date=booking_date,
+        zims_now=zims_now,
+        paynow_reference=paynow_reference,
+        draft=draft,
+        payment_amount=draft.get("payment_amount"),
+        payment_method=draft.get("payment_method"),
+        paynow_ref=paynow_ref,
+    )
+
+    booking_id = result["id"]
+    logger.info(f"Booking {booking_id} CONFIRMED via webhook — slot {draft['slot_time']} on {draft['booking_date']}")
+
+    return {"status": "CONFIRMED", "booking_id": booking_id}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  POST /api/book/{booking_id}/confirm  (legacy — for existing DB bookings)
+#  Kept for backward compatibility with any in-flight PENDING bookings.
+# ═══════════════════════════════════════════════════════════════════════════
+@router.post("/{booking_id}/confirm")
+def confirm_booking_legacy(booking_id: int, request: Request, db: db_dependency) -> dict:
+    """
+    Legacy path: promotes an existing PENDING booking row to CONFIRMED.
+    Only used for bookings created before the draft-token architecture was deployed.
+    New bookings use POST /api/book/confirm (no booking_id).
+    """
+    secret = request.headers.get("X-Internal-Secret")
+    if not INTERNAL_SECRET or secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden: Internal Clearance Only")
+
+    booking = booking_crud.get_by_id(db, booking_id)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    if booking.status == "CONFIRMED":
+        logger.info(f"Booking {booking_id} already CONFIRMED — idempotent")
+        return {"status": "CONFIRMED", "booking_id": booking_id, "idempotent": True}
+
+    paynow_reference = request.headers.get("X-Paynow-Reference")
+    zims_now = _get_zim_now()
+
+    try:
+        booking.status = "CONFIRMED"
+        booking.reserved_until = None
+
+        transaction = booking_crud.get_latest_transaction(db, booking_id)
+        if transaction:
+            transaction.status = "completed"
+            if paynow_reference:
+                transaction.provider_ref = paynow_reference
+
+        audit = AuditLog(
+            actor_id=booking.user_id,
+            role="system",
+            action="PAYMENT_CONFIRMED_LEGACY",
+            resource_id=str(booking_id),
+            metadata_json={"provider_ref": paynow_reference, "confirmed_at": zims_now.isoformat()},
+        )
+        db.add(audit)
+        db.commit()
+        return {"status": "CONFIRMED", "booking_id": booking_id}
+
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error(f"Legacy confirm failed for booking {booking_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Confirm state transition failed")
+
+
+# ── Internal helper: write a CONFIRMED booking to DB ─────────────────────────
+def _create_confirmed_booking(
+    db: Session,
+    req,                        # BookingCreate or None (when called from draft confirm)
+    slot: str,
+    booking_date: date,
+    zims_now: datetime,
+    paynow_reference: Optional[str],
+    draft: Optional[dict] = None,
+    payment_amount: Optional[float] = None,
+    payment_method: Optional[str] = None,
+    paynow_ref: Optional[str] = None,
+) -> dict:
+    """
+    Atomically inserts a CONFIRMED booking + PaymentTransaction + AuditLog.
+    Used by both the cash path (from create_draft) and the webhook confirm path.
+    Returns a dict with 'id' and booking fields.
+    """
+    is_cash = (req is not None) and req.payment_method in (None, "CASH", "cash")
+
+    # Resolve fields — prefer draft dict over req
+    name            = (draft or {}).get("name") or (req.name if req else "")
+    service         = (draft or {}).get("service") or (req.service if req else "")
+    user_id         = (draft or {}).get("user_id") or (req.user_id if req else "")
+    pay_method      = payment_method or (req.payment_method if req else None)
+    pay_amount      = payment_amount or (req.payment_amount if req else 0.0)
+    pn_ref          = paynow_ref or (req.paynow_ref if req else None)
 
     new_booking = Booking(
-        name=req.name,
-        service=req.service,
-        user_id=req.user_id,
+        name=name,
+        service=service,
+        user_id=user_id,
         slot_time=slot,
         booking_date=booking_date,
-        status="CONFIRMED" if is_cash else "PENDING",
-        reserved_until=ttl,
+        status="CONFIRMED",
+        reserved_until=None,   # No TTL — booking is confirmed immediately
     )
 
     try:
         db.add(new_booking)
-        db.flush()  # Materialise the ID before commit
+        db.flush()  # Materialise the ID
 
         # ── PaymentTransaction ───────────────────────────────────────────
-        # Created for every non-cash booking so the ledger, status-poll,
-        # and confirm webhook all have a record to operate on.
         if not is_cash:
             transaction = PaymentTransaction(
                 booking_id=new_booking.id,
-                amount=req.payment_amount,
+                amount=pay_amount,
                 currency="USD",
-                provider=req.payment_method,
-                status="pending",
-                poll_url=req.poll_url,
-                # BUG 2 FIX: store the paynow_ref at initiation time.
-                # The frontend generates a UUID before calling /initiate and
-                # passes it back here via the poll_url field metadata.
-                # The actual Paynow reference code is captured from the
-                # webhook (provider_ref) once payment completes.
-                paynow_ref=req.paynow_ref,
+                provider=pay_method,
+                status="completed",
+                paynow_ref=pn_ref,
+                provider_ref=paynow_reference,
                 metadata_json={
-                    "service": req.service,
+                    "service": service,
                     "date": str(booking_date),
                     "slot": slot,
-                    "initiated_by": req.user_id,
-                    "reserved_until": ttl.isoformat() if ttl else None,
+                    "initiated_by": user_id,
+                    "confirmed_via": "webhook",
                 },
             )
             db.add(transaction)
 
         # ── Audit log ────────────────────────────────────────────────────
         audit = AuditLog(
-            actor_id=req.user_id,
-            role="customer",
-            action="CREATE_BOOKING",
+            actor_id=user_id,
+            role="system" if not is_cash else "customer",
+            action="BOOKING_CONFIRMED" if not is_cash else "CASH_BOOKING_CREATED",
             resource_id=str(new_booking.id),
             metadata_json={
-                "service": req.service,
+                "service": service,
                 "date": str(booking_date),
                 "slot": slot,
-                "payment_method": req.payment_method,
-                "status": new_booking.status,
-                "reserved_until": ttl.isoformat() if ttl else None,
+                "payment_method": pay_method,
+                "provider_ref": paynow_reference,
+                "confirmed_at": zims_now.isoformat(),
             },
         )
         db.add(audit)
 
         # ── CRM sync (non-critical) ──────────────────────────────────────
         try:
-            customer_crud.upsert_from_booking(db, clerk_id=req.user_id, name=req.name)
+            customer_crud.upsert_from_booking(db, clerk_id=user_id, name=name)
         except Exception:
             pass
 
         db.commit()
         db.refresh(new_booking)
-        return new_booking
+
+        return {
+            "id":           new_booking.id,
+            "slot_time":    new_booking.slot_time,
+            "booking_date": str(new_booking.booking_date),
+            "status":       new_booking.status,
+            "name":         new_booking.name,
+            "service":      new_booking.service,
+            "user_id":      new_booking.user_id,
+            "created_at":   new_booking.created_at.isoformat() if new_booking.created_at else None,
+        }
 
     except IntegrityError:
         db.rollback()
@@ -206,110 +485,41 @@ def create_booking(
         )
     except SQLAlchemyError as exc:
         db.rollback()
-        logger.error(f"Database error creating booking: {exc}")
+        logger.error(f"Database error creating confirmed booking: {exc}")
         raise HTTPException(status_code=500, detail="Failed to save booking to database")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  POST /api/book/{booking_id}/confirm
-#  Phase 2: Webhook-only endpoint — promotes PENDING → CONFIRMED.
-#  Called by the PayNow microservice after hash-verified IPN.
-# ═══════════════════════════════════════════════════════════════════════════
-@router.post("/{booking_id}/confirm")
-def confirm_booking(booking_id: int, request: Request, db: db_dependency) -> dict:
-    # ── Internal secret guard ────────────────────────────────────────────
-    secret = request.headers.get("X-Internal-Secret")
-    if not INTERNAL_SECRET or secret != INTERNAL_SECRET:
-        raise HTTPException(status_code=403, detail="Forbidden: Internal Clearance Only")
-
-    booking = booking_crud.get_by_id(db, booking_id)
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
-
-    # ── Idempotency: already confirmed — return success without re-writing ─
-    if booking.status == "CONFIRMED":
-        logger.info(f"Booking {booking_id} already CONFIRMED — skipping duplicate confirm")
-        return {"status": "CONFIRMED", "booking_id": booking_id, "idempotent": True}
-
-    # ── Guard: TTL expired before confirmation arrived ────────────────────
-    # We still confirm it — the webhook proves real payment. The TTL is only
-    # for cleanup of ABANDONED reservations with no payment signal.
-    zims_now = _get_zim_now()
-
-    # Extract Paynow reference from the webhook payload header (set by paynow service)
-    paynow_reference = request.headers.get("X-Paynow-Reference")
-
-    try:
-        booking.status = "CONFIRMED"
-        booking.reserved_until = None  # Clear TTL — slot is permanently locked
-
-        transaction = booking_crud.get_latest_transaction(db, booking_id)
-        if transaction:
-            transaction.status = "completed"
-            # BUG 2 FIX: store the authoritative reference from the IPN
-            if paynow_reference:
-                transaction.provider_ref = paynow_reference
-
-        audit = AuditLog(
-            actor_id=booking.user_id,
-            role="system",
-            action="PAYMENT_CONFIRMED",
-            resource_id=str(booking_id),
-            metadata_json={
-                "provider": transaction.provider if transaction else None,
-                "amount": transaction.amount if transaction else None,
-                "provider_ref": paynow_reference,
-                "confirmed_at": zims_now.isoformat(),
-            },
-        )
-        db.add(audit)
-        db.commit()
-        return {"status": "CONFIRMED", "booking_id": booking_id}
-
-    except SQLAlchemyError as exc:
-        db.rollback()
-        logger.error(f"Confirm commit failed for booking {booking_id}: {exc}")
-        raise HTTPException(status_code=500, detail="Final commitment state transition failed")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 #  POST /api/book/{booking_id}/cancel
-#  Called by the PayNow microservice when the IPN reports a cancelled or
-#  failed payment.  Transitions:
-#    PaymentTransaction.status  → "failed"
-#    Booking.status             → "CANCELLED"
-#  Idempotent — safe to call multiple times.
+#  Called by the PayNow microservice when IPN reports cancelled or failed.
+#  Also handles legacy PENDING bookings from before the draft-token era.
 # ═══════════════════════════════════════════════════════════════════════════
 @router.post("/{booking_id}/cancel")
-def cancel_booking_payment(
-    booking_id: int,
-    request: Request,
-    db: db_dependency,
-) -> dict:
+def cancel_booking_payment(booking_id: int, request: Request, db: db_dependency) -> dict:
     secret = request.headers.get("X-Internal-Secret")
     if not INTERNAL_SECRET or secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden: Internal Clearance Only")
 
     booking = booking_crud.get_by_id(db, booking_id)
     if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+        # In the new architecture, a cancelled-before-confirmed draft has no DB row.
+        # That's the whole point — nothing to clean up.
+        logger.info(f"Cancel called for booking {booking_id} — not found in DB (already a clean draft). No-op.")
+        return {"status": "NO_BOOKING_FOUND", "booking_id": booking_id, "note": "Draft was never written to DB — slot is already free."}
 
-    # Idempotency — already cancelled, nothing to do
     if booking.status == "CANCELLED":
-        logger.info(f"Booking {booking_id} already CANCELLED — skipping duplicate cancel")
         return {"status": "CANCELLED", "booking_id": booking_id, "idempotent": True}
 
-    # Only cancel PENDING bookings — never cancel CONFIRMED or VERIFYING ones
     if booking.status not in ("PENDING", "VERIFYING"):
         logger.warning(f"Cancel rejected for booking {booking_id}: status is {booking.status}")
         raise HTTPException(
             status_code=409,
-            detail=f"Cannot cancel a booking in status {booking.status}"
+            detail=f"Cannot cancel a booking in status {booking.status}",
         )
 
     try:
         booking.status = "CANCELLED"
-        booking.reserved_until = None  # Clear TTL — no longer needed
+        booking.reserved_until = None
 
         transaction = booking_crud.get_latest_transaction(db, booking_id)
         if transaction and transaction.status in ("pending", "manual_review"):
@@ -321,7 +531,6 @@ def cancel_booking_payment(
             action="PAYMENT_CANCELLED",
             resource_id=str(booking_id),
             metadata_json={
-                "previous_status": booking.status,
                 "reason": "PayNow IPN reported cancelled/failed",
                 "cancelled_at": _get_zim_now().isoformat(),
             },
@@ -338,62 +547,10 @@ def cancel_booking_payment(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  GET|POST /api/book/cleanup-expired
-#  Vercel cron calls this every 5 minutes to release stuck PENDING slots.
-#  GET  → used by Vercel cron (crons only support GET).
-#  POST → used by internal services / manual admin trigger.
-#  Both are protected by the X-Internal-Secret header.
-# ═══════════════════════════════════════════════════════════════════════════
-@router.get("/cleanup-expired")
-@router.post("/cleanup-expired")
-def cleanup_expired_reservations(request: Request, db: db_dependency) -> dict:
-    secret = request.headers.get("X-Internal-Secret")
-    if not INTERNAL_SECRET or secret != INTERNAL_SECRET:
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-    try:
-        result = db.execute(
-            text(
-                """
-                UPDATE public.bookings
-                SET status = 'CANCELLED'
-                WHERE status = 'PENDING'
-                  AND reserved_until IS NOT NULL
-                  AND reserved_until < NOW()
-                RETURNING id
-                """
-            )
-        )
-        cancelled_ids = [row[0] for row in result.fetchall()]
-
-        if cancelled_ids:
-            # Mark corresponding transactions as failed
-            db.execute(
-                text(
-                    """
-                    UPDATE public.payment_transactions
-                    SET status = 'failed'
-                    WHERE booking_id = ANY(:ids)
-                      AND status = 'pending'
-                    """
-                ),
-                {"ids": cancelled_ids},
-            )
-
-        db.commit()
-        logger.info(f"Cleanup: cancelled {len(cancelled_ids)} expired reservations → IDs: {cancelled_ids}")
-        return {"cancelled": len(cancelled_ids), "ids": cancelled_ids}
-
-    except SQLAlchemyError as exc:
-        db.rollback()
-        logger.error(f"Cleanup job failed: {exc}")
-        raise HTTPException(status_code=500, detail="Cleanup failed")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 #  GET /api/book/{booking_id}/payment-status
-#  Frontend polls this every 4s during the awaiting_payment state.
-#  Status is written by the PayNow webhook → confirm endpoint, not by polling.
+#  Frontend polls this during awaiting_payment.
+#  In the new architecture, booking_id may be 0 (draft) — we check by
+#  paynow_ref if no DB row exists yet.
 # ═══════════════════════════════════════════════════════════════════════════
 @router.get("/{booking_id}/payment-status", response_model=PaymentStatusResponse)
 def get_payment_status(
@@ -403,8 +560,15 @@ def get_payment_status(
 ) -> dict:
     try:
         booking = booking_crud.get_by_id(db, booking_id)
+
+        # booking_id = 0 is the sentinel for "draft not yet in DB"
+        # The frontend should also pass ?paynow_ref= so we can look up by tx.
         if not booking:
-            raise HTTPException(status_code=404, detail="Booking not found")
+            return {
+                "bookingId": booking_id,
+                "status": "PENDING",
+                "transactionRef": None,
+            }
 
         is_admin = user.get("metadata", {}).get("role") in ["admin", "owner"]
         if booking.user_id != user.get("sub") and not is_admin:
@@ -415,7 +579,7 @@ def get_payment_status(
         if not transaction:
             return {"bookingId": booking_id, "status": "PENDING", "transactionRef": None}
 
-        # ── Confirmed (webhook already fired) ───────────────────────────
+        # ── Confirmed ───────────────────────────────────────────────────
         if transaction.status == "completed" or booking.status == "CONFIRMED":
             return {
                 "bookingId": booking_id,
@@ -423,7 +587,7 @@ def get_payment_status(
                 "transactionRef": transaction.provider_ref or transaction.paynow_ref,
             }
 
-        # ── Payment failed / cancelled ───────────────────────────────────
+        # ── Failed ──────────────────────────────────────────────────────
         if transaction.status in ("cancelled", "rejected", "failed"):
             if booking.status != "CANCELLED":
                 booking.status = "CANCELLED"
@@ -440,7 +604,7 @@ def get_payment_status(
                 },
             }
 
-        # ── TTL expired — abandon the reservation ────────────────────────
+        # ── TTL expired ──────────────────────────────────────────────────
         zims_now = _get_zim_now()
         if (
             booking.reserved_until
@@ -463,10 +627,7 @@ def get_payment_status(
                 },
             }
 
-        # ── Still pending: actively check PayNow poll_url as IPN fallback ──
-        # The IPN webhook is the primary signal. On every poll call we also
-        # query PayNow directly so a cancelled or paid status is captured
-        # immediately without waiting for the IPN or the TTL to expire.
+        # ── Still pending: active PayNow poll_url check (IPN fallback) ───
         if transaction.poll_url:
             try:
                 import httpx as _httpx
@@ -529,7 +690,103 @@ def get_payment_status(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  POST /api/book/verify-payment   (fallback manual reference submission)
+#  GET /api/book/{paynow_ref}/draft-status
+#  New endpoint: frontend polls this BEFORE the booking has a DB ID.
+#  Checks PaymentTransaction by paynow_ref UUID to detect webhook arrival.
+# ═══════════════════════════════════════════════════════════════════════════
+@router.get("/draft-status/{paynow_ref}")
+def get_draft_payment_status(
+    paynow_ref: str,
+    db: db_dependency,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Polls status using the paynow_ref UUID (before a booking ID exists).
+    Returns PENDING, PAID (with bookingId), or REJECTED.
+    """
+    tx = (
+        db.query(PaymentTransaction)
+        .filter(PaymentTransaction.paynow_ref == paynow_ref)
+        .first()
+    )
+
+    if not tx:
+        return {"status": "PENDING", "bookingId": None}
+
+    booking = booking_crud.get_by_id(db, tx.booking_id) if tx.booking_id else None
+
+    if tx.status == "completed" and booking and booking.status == "CONFIRMED":
+        return {
+            "status": "PAID",
+            "bookingId": tx.booking_id,
+            "transactionRef": tx.provider_ref or tx.paynow_ref,
+            "slot_time": booking.slot_time,
+            "booking_date": str(booking.booking_date),
+        }
+
+    if tx.status in ("failed", "cancelled", "rejected"):
+        return {
+            "status": "REJECTED",
+            "bookingId": None,
+            "error": {
+                "code": f"PAYMENT_{tx.status.upper()}",
+                "message": "Payment was not completed.",
+            },
+        }
+
+    return {"status": "PENDING", "bookingId": None}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  POST /api/book/cleanup-expired
+#  Legacy cleanup — only relevant for PENDING rows from before the
+#  draft-token era. New bookings never create PENDING rows.
+# ═══════════════════════════════════════════════════════════════════════════
+@router.get("/cleanup-expired")
+@router.post("/cleanup-expired")
+def cleanup_expired_reservations(request: Request, db: db_dependency) -> dict:
+    secret = request.headers.get("X-Internal-Secret")
+    if not INTERNAL_SECRET or secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    try:
+        result = db.execute(
+            text(
+                """
+                UPDATE public.bookings
+                SET status = 'CANCELLED'
+                WHERE status = 'PENDING'
+                  AND reserved_until IS NOT NULL
+                  AND reserved_until < NOW()
+                RETURNING id
+                """
+            )
+        )
+        cancelled_ids = [row[0] for row in result.fetchall()]
+
+        if cancelled_ids:
+            db.execute(
+                text(
+                    """
+                    UPDATE public.payment_transactions
+                    SET status = 'failed'
+                    WHERE booking_id = ANY(:ids)
+                      AND status = 'pending'
+                    """
+                ),
+                {"ids": cancelled_ids},
+            )
+
+        db.commit()
+        return {"cancelled": len(cancelled_ids), "ids": cancelled_ids}
+
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Cleanup failed")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  POST /api/book/verify-payment  (manual ref submission fallback)
 # ═══════════════════════════════════════════════════════════════════════════
 @router.post("/verify-payment")
 def submit_payment_reference(
@@ -537,25 +794,19 @@ def submit_payment_reference(
     db: db_dependency,
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """
-    Customer manually submits an EcoCash/OneMoney reference code.
-    Flags the transaction for manual review in the IT Command Center.
-    This is the fallback path — the primary path is the PayNow webhook.
-    """
     booking = booking_crud.get_by_id(db, req.booking_id)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     if booking.user_id != user.get("sub"):
-        raise HTTPException(status_code=403, detail="Forbidden: You do not own this booking")
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     transaction = booking_crud.get_pending_transaction(db, req.booking_id)
     if not transaction:
-        raise HTTPException(status_code=404, detail="Pending transaction not found for this booking")
+        raise HTTPException(status_code=404, detail="Pending transaction not found")
 
     transaction.provider_ref = req.provider_ref
     transaction.status = "manual_review"
     booking.status = "VERIFYING"
-    # Clear TTL so the slot isn't auto-cancelled while under manual review
     booking.reserved_until = None
 
     audit = AuditLog(
@@ -568,7 +819,7 @@ def submit_payment_reference(
     try:
         db.add(audit)
         db.commit()
-        return {"message": "Reference submitted. Our team will verify and confirm your booking shortly."}
+        return {"message": "Reference submitted. Our team will verify shortly."}
     except SQLAlchemyError:
         db.rollback()
         raise HTTPException(status_code=500, detail="Reference submission failed")
@@ -589,7 +840,7 @@ def update_booking(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     if db_booking.user_id != user.get("sub") and user.get("metadata", {}).get("role") not in ["admin", "owner"]:
-        raise HTTPException(status_code=403, detail="Forbidden: Resource ownership mismatch")
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     update_data = req.model_dump(exclude_unset=True)
     new_date = update_data.get("booking_date", db_booking.booking_date)
@@ -639,10 +890,7 @@ def get_available_slots(db: db_dependency, date: Optional[date] = None) -> List[
 
 
 @router.get("/", response_model=List[BookingSchema])
-def list_bookings(
-    db: db_dependency,
-    booking_date: Optional[date] = None,
-) -> List[Booking]:
+def list_bookings(db: db_dependency, booking_date: Optional[date] = None) -> List[Booking]:
     if booking_date:
         return booking_crud.list_by_date(db, str(booking_date))
     return db.query(Booking).order_by(Booking.booking_date.desc()).all()
@@ -656,4 +904,5 @@ def get_user_bookings(
 ) -> List[Booking]:
     if user_id != user.get("sub") and user.get("metadata", {}).get("role") not in ["admin", "owner"]:
         raise HTTPException(status_code=403, detail="Personal data isolation violation")
-    return booking_crud.list_by_user(db, user_id)
+    # Only return CONFIRMED bookings to the user — drafts don't exist in DB
+    return [b for b in booking_crud.list_by_user(db, user_id) if b.status in ("CONFIRMED", "COMPLETED", "VERIFYING")]

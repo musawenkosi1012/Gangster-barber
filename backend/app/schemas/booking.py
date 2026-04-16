@@ -1,6 +1,18 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional
+from typing import Optional, Union
 from datetime import date, datetime
+
+
+class DraftTokenResponse(BaseModel):
+    """
+    Returned by POST /api/book/ for electronic payments.
+    No booking row exists in the DB yet — just a signed draft token.
+    """
+    draft_token: str
+    slot_time: str
+    booking_date: str
+    expires_at: str
+
 
 class BookingBase(BaseModel):
     name: str
