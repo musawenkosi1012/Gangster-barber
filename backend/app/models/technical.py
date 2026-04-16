@@ -25,8 +25,9 @@ class PaymentTransaction(Base):
     currency = Column(String, default="USD")
     provider = Column(String, nullable=False) # EcoCash, OneMoney, InnBucks
     status = Column(String, default="PENDING") # pending, completed, failed, reversed, manual_review
-    provider_ref = Column(String, nullable=True) # Reference code from provider
-    poll_url = Column(String, nullable=True) # Paynow poll URL for status checking
+    provider_ref = Column(String, nullable=True)  # Reference code from provider (set on manual submit)
+    paynow_ref = Column(String, nullable=True)     # Paynow reference captured at initiation time
+    poll_url = Column(String, nullable=True)        # Paynow poll URL for status checking
     metadata_json = Column(JSON) # e.g. {"from": "PENDING", "to": "CONFIRMED"}
     created_at = Column(DateTime, server_default=func.now())
 

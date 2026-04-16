@@ -54,34 +54,36 @@ async def verify_request_auth(
     return True
 
 
-async def notify_backend_of_payment(booking_id: str, status: str):
+async def notify_backend_of_payment(booking_id: str, paynow_reference: Optional[str] = None):
     """
-    Internal bridge to sync payment status with the main core backend.
-    Enforces the Contract: Verification must happen before state promotion.
+    Internal bridge: calls POST /api/book/{id}/confirm on the core backend
+    after the PayNow IPN hash has been verified here.
+    Forwards the Paynow reference so it is stored on the PaymentTransaction.
     """
     backend_url = os.getenv("BACKEND_API_URL", "")
     internal_secret = os.getenv("INTERNAL_API_SECRET", "")
-    
+
     if not backend_url:
-        logger.error("BACKEND_API_URL not configured")
+        logger.error("BACKEND_API_URL not configured — cannot confirm booking")
         return
+
+    headers = {"X-Internal-Secret": internal_secret}
+    if paynow_reference:
+        headers["X-Paynow-Reference"] = paynow_reference
 
     try:
         async with httpx.AsyncClient() as client:
-            # Shift-Left Security: Use internal secret to authorize state change
             response = await client.post(
                 f"{backend_url}/api/book/{booking_id}/confirm",
-                headers={"X-Internal-Secret": internal_secret},
-                timeout=15.0
+                headers=headers,
+                timeout=15.0,
             )
-            
             if response.status_code == 200:
-                logger.info(f"✅ Booking {booking_id} verified and confirmed by Core.")
+                logger.info(f"✅ Booking {booking_id} confirmed. Ref={paynow_reference}")
             else:
                 logger.error(f"❌ Core rejected confirmation for {booking_id}: {response.text}")
-
-    except Exception as e:
-        logger.error(f"❌ Backend synchronization failure: {e}")
+    except Exception as exc:
+        logger.error(f"❌ Backend sync failure for booking {booking_id}: {exc}")
 
 
 @router.post("/webhook")
@@ -129,28 +131,36 @@ async def paynow_webhook(request: Request):
             return JSONResponse(status_code=401, content={"error": "Invalid Hash Signature"})
 
         status = (data.get("Status") or data.get("status") or "").lower()
+        # PayNow sends the booking reference we set when creating the payment
         booking_id = data.get("Reference") or data.get("reference")
+        # The PayNow transaction reference (what the customer sees on their phone)
+        paynow_reference = data.get("paynowreference") or data.get("PaynowReference") or data.get("PayNowReference")
 
         if status in ["paid", "awaiting delivery", "delivered"]:
             if booking_id:
-                # Fix 9: Idempotency — check current booking status before updating
+                # Idempotency guard: skip if already confirmed
                 backend_url = os.getenv("BACKEND_API_URL", "")
                 if backend_url:
                     try:
                         async with httpx.AsyncClient() as client:
                             check = await client.get(
                                 f"{backend_url}/api/book/{booking_id}/payment-status",
-                                timeout=5.0
+                                timeout=5.0,
                             )
                             if check.status_code == 200:
                                 check_data = check.json()
-                                if check_data.get("paid"):
-                                    logger.info(f"⏭️ Booking {booking_id} already confirmed — skipping duplicate webhook.")
+                                if check_data.get("status") == "PAID":
+                                    logger.info(f"⏭️ Booking {booking_id} already confirmed — skipping duplicate webhook")
                                     return {"status": "already_processed", "reference": booking_id}
-                    except Exception as e:
-                        logger.warning(f"Idempotency check failed (proceeding anyway): {e}")
+                    except Exception as exc:
+                        logger.warning(f"Idempotency check failed (proceeding anyway): {exc}")
 
-                await notify_backend_of_payment(booking_id, "CONFIRMED")
+                # Forward reference to core so it lands on PaymentTransaction.provider_ref
+                await notify_backend_of_payment(booking_id, paynow_reference)
+
+        elif status in ["cancelled", "failed"]:
+            # Future: notify backend to mark transaction as failed immediately
+            logger.info(f"Payment {status} for booking {booking_id} — TTL cleanup will release the slot")
 
         return {"status": "verified", "reference": booking_id}
 

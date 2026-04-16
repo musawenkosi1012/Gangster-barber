@@ -5,5 +5,11 @@
   ],
   "routes": [
     { "src": "/(.*)", "dest": "index.py" }
+  ],
+  "crons": [
+    {
+      "path": "/api/book/cleanup-expired",
+      "schedule": "*/5 * * * *"
+    }
   ]
 }

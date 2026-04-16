@@ -409,6 +409,7 @@ export default function BookPage() {
     setPaymentError(null);
     setPaymentInstructions(null);
     setBookingStatus("booking");
+
     try {
       const finalService = selectedService.name;
       const payAmount = payForCut
@@ -416,36 +417,20 @@ export default function BookPage() {
         : BOOKING_DEPOSIT;
 
       const method = paymentMethod.replace("paynow_", "");
-      const paynowRef = typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `ref-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      
-      const payPayload = buildPaymentPayload(method, paynowRef, { ...formData, service: finalService }, user, phoneNumber, payAmount);
 
-      const payRes = await fetch(`/api/payments/initiate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payPayload),
-      });
-      const payData = await payRes.json();
+      // Generate a stable UUID for this payment attempt.
+      // This is sent to PayNow as the booking reference AND stored on the
+      // PaymentTransaction so we can correlate the IPN callback.
+      const paynowRef: string =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `ref-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-      if (!payData.success) {
-        setPaymentError(payData.error || "Payment initiation failed. Please try again.");
-        setBookingStatus("idle");
-        return;
-      }
-
-      if (payData.redirect_url) {
-        window.location.href = payData.redirect_url;
-        return;
-      }
-
-      const instructions = buildPaymentInstructions(payData);
-      if (instructions) setPaymentInstructions(instructions);
-
-      const pollUrl = payData.poll_url || null;
-      setPaymentPollUrl(pollUrl);
-
+      // ── Phase 0: Create the booking BEFORE initiating payment ──────────
+      // This ensures we have a real booking ID to embed in the PayNow
+      // reference and to target with the webhook confirm call.
+      // The booking starts in PENDING with a 10-minute TTL — the slot is
+      // held but NOT permanently locked until payment is confirmed.
       const token = await getToken();
       const bookRes = await syndicateFetch("/api/book/", {
         method: "POST",
@@ -458,49 +443,112 @@ export default function BookPage() {
           booking_date: selectedDate,
           payment_method: paymentMethod,
           payment_amount: payAmount,
-          poll_url: pollUrl,
+          paynow_ref: paynowRef,   // stored at initiation time (Bug 2 fix)
+          poll_url: null,           // poll_url not yet known — updated below
         }),
       });
       if (!bookRes.ok) throw new Error("Booking creation failed");
       const bookData = await bookRes.json();
+      const bookingId: number = bookData.id;
 
-      setPendingBookingId(bookData.id);
+      setPendingBookingId(bookingId);
       setAllocatedSlot(bookData.slot_time);
+
+      // ── Phase 1: Initiate payment with the real booking ID ─────────────
+      // We use the DB booking ID as the PayNow reference so the webhook
+      // can map directly back to the booking record with no ambiguity.
+      const payPayload = buildPaymentPayload(
+        method,
+        String(bookingId),  // real ID — not a temp UUID
+        { ...formData, service: finalService },
+        user,
+        phoneNumber,
+        payAmount,
+      );
+
+      const payRes = await fetch(`/api/payments/initiate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payPayload),
+      });
+      const payData = await payRes.json();
+
+      if (!payData.success) {
+        // Payment initiation failed — cancel the PENDING booking immediately
+        // so the slot is released and the TTL doesn't have to expire.
+        try {
+          await syndicateFetch(`/api/book/${bookingId}`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch { /* best-effort cancel */ }
+        setPaymentError(payData.error || "Payment initiation failed. Please try again.");
+        setBookingStatus("idle");
+        return;
+      }
+
+      // ── Web Pay redirect flow ─────────────────────────────────────────
+      // The user leaves this page. We embed the bookingId in the return URL
+      // so /payment-return can pick up where we left off.
+      if (payData.redirect_url) {
+        const returnBase = `${window.location.origin}/payment-return?bookingId=${bookingId}`;
+        // PayNow uses the return_url configured on the client — we can't
+        // append bookingId to PayNow's redirect, but our paynow_client
+        // PAYNOW_RETURN_URL env var should already point to /payment-return.
+        // As a safety net, we store bookingId in sessionStorage.
+        sessionStorage.setItem("pendingBookingId", String(bookingId));
+        window.location.href = payData.redirect_url;
+        return;
+      }
+
+      // ── Mobile payment (EcoCash / OneMoney / InnBucks) ────────────────
+      const instructions = buildPaymentInstructions(payData);
+      if (instructions) setPaymentInstructions(instructions);
+
+      const pollUrl = payData.poll_url || null;
+      setPaymentPollUrl(pollUrl);
       setBookingStatus("awaiting_payment");
 
-      const maxAttempts = 75;
+      // ── Phase 2: Poll for webhook-driven status update ─────────────────
+      // The frontend polls every 4 s. The status is written to the DB by
+      // the PayNow IPN webhook → /confirm endpoint, NOT by this loop itself.
+      // This loop just reads what the webhook wrote.
+      const maxAttempts = 75; // 5 minutes
       let attempts = 0;
-      const poll = setInterval(async () => {
+      const pollInterval = setInterval(async () => {
         attempts++;
         try {
-          const statusRes = await syndicateFetch(`/api/book/${bookData.id}/payment-status`);
+          const statusRes = await syndicateFetch(`/api/book/${bookingId}/payment-status`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
           const statusData = await statusRes.json();
 
           if (statusData.status === "PAID") {
-            clearInterval(poll);
+            clearInterval(pollInterval);
             setBookingStatus("success");
             return;
           }
 
           if (statusData.status === "REJECTED" || statusData.status === "EXPIRED") {
-            clearInterval(poll);
+            clearInterval(pollInterval);
             setBookingStatus("payment_failed");
             return;
           }
         } catch {
-          // network hiccup
+          // Network hiccup — keep polling
         }
 
         if (attempts >= maxAttempts) {
-          clearInterval(poll);
+          clearInterval(pollInterval);
+          // Offer manual reference submission rather than silent failure
           setBookingStatus("verifying");
         }
       }, 4000);
 
-    } catch (err) {
+    } catch {
       setBookingStatus("error");
     }
-  }, [selectedService, bookingMode, selectedSlot, payForCut, paymentMethod, formData, user, phoneNumber, selectedDate]);
+  }, [selectedService, bookingMode, selectedSlot, payForCut, paymentMethod, formData, user, phoneNumber, selectedDate, getToken]);
 
   if (!mounted || !isLoaded) return null;
 
