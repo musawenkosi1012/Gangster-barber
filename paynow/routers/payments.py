@@ -54,36 +54,45 @@ async def verify_request_auth(
     return True
 
 
-async def notify_backend_of_payment(booking_id: str, paynow_reference: Optional[str] = None):
-    """
-    Internal bridge: calls POST /api/book/{id}/confirm on the core backend
-    after the PayNow IPN hash has been verified here.
-    Forwards the Paynow reference so it is stored on the PaymentTransaction.
-    """
+async def _call_backend(path: str, headers: dict, label: str) -> bool:
+    """POST to the core backend. Returns True on success."""
     backend_url = os.getenv("BACKEND_API_URL", "")
     internal_secret = os.getenv("INTERNAL_API_SECRET", "")
-
     if not backend_url:
-        logger.error("BACKEND_API_URL not configured — cannot confirm booking")
-        return
-
-    headers = {"X-Internal-Secret": internal_secret}
-    if paynow_reference:
-        headers["X-Paynow-Reference"] = paynow_reference
-
+        logger.error("BACKEND_API_URL not configured")
+        return False
+    headers["X-Internal-Secret"] = internal_secret
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{backend_url}/api/book/{booking_id}/confirm",
-                headers=headers,
-                timeout=15.0,
-            )
-            if response.status_code == 200:
-                logger.info(f"✅ Booking {booking_id} confirmed. Ref={paynow_reference}")
+            resp = await client.post(f"{backend_url}{path}", headers=headers, timeout=15.0)
+            if resp.status_code == 200:
+                logger.info(f"✅ {label} — {path}")
+                return True
             else:
-                logger.error(f"❌ Core rejected confirmation for {booking_id}: {response.text}")
+                logger.error(f"❌ {label} rejected: {resp.status_code} {resp.text}")
+                return False
     except Exception as exc:
-        logger.error(f"❌ Backend sync failure for booking {booking_id}: {exc}")
+        logger.error(f"❌ {label} failed: {exc}")
+        return False
+
+
+async def notify_backend_of_payment(booking_id: str, paynow_reference: Optional[str] = None):
+    """
+    Calls POST /api/book/{id}/confirm after IPN hash verification.
+    Forwards the Paynow reference so it lands on PaymentTransaction.provider_ref.
+    """
+    headers = {}
+    if paynow_reference:
+        headers["X-Paynow-Reference"] = paynow_reference
+    await _call_backend(f"/api/book/{booking_id}/confirm", headers, f"Confirm booking {booking_id}")
+
+
+async def notify_backend_payment_failed(booking_id: str):
+    """
+    Calls POST /api/book/{id}/cancel after IPN reports cancelled or failed.
+    Sets transaction.status = 'failed' and booking.status = 'CANCELLED' in one atomic write.
+    """
+    await _call_backend(f"/api/book/{booking_id}/cancel", {}, f"Cancel booking {booking_id}")
 
 
 @router.post("/webhook")
@@ -159,8 +168,11 @@ async def paynow_webhook(request: Request):
                 await notify_backend_of_payment(booking_id, paynow_reference)
 
         elif status in ["cancelled", "failed"]:
-            # Future: notify backend to mark transaction as failed immediately
-            logger.info(f"Payment {status} for booking {booking_id} — TTL cleanup will release the slot")
+            # IPN explicitly reports failure — cancel the booking immediately
+            # so the slot is released without waiting for the TTL to expire.
+            if booking_id:
+                logger.info(f"Payment {status} for booking {booking_id} — notifying backend to cancel")
+                await notify_backend_payment_failed(booking_id)
 
         return {"status": "verified", "reference": booking_id}
 

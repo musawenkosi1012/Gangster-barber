@@ -273,6 +273,71 @@ def confirm_booking(booking_id: int, request: Request, db: db_dependency) -> dic
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  POST /api/book/{booking_id}/cancel
+#  Called by the PayNow microservice when the IPN reports a cancelled or
+#  failed payment.  Transitions:
+#    PaymentTransaction.status  → "failed"
+#    Booking.status             → "CANCELLED"
+#  Idempotent — safe to call multiple times.
+# ═══════════════════════════════════════════════════════════════════════════
+@router.post("/{booking_id}/cancel")
+def cancel_booking_payment(
+    booking_id: int,
+    request: Request,
+    db: db_dependency,
+) -> dict:
+    secret = request.headers.get("X-Internal-Secret")
+    if not INTERNAL_SECRET or secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden: Internal Clearance Only")
+
+    booking = booking_crud.get_by_id(db, booking_id)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    # Idempotency — already cancelled, nothing to do
+    if booking.status == "CANCELLED":
+        logger.info(f"Booking {booking_id} already CANCELLED — skipping duplicate cancel")
+        return {"status": "CANCELLED", "booking_id": booking_id, "idempotent": True}
+
+    # Only cancel PENDING bookings — never cancel CONFIRMED or VERIFYING ones
+    if booking.status not in ("PENDING", "VERIFYING"):
+        logger.warning(f"Cancel rejected for booking {booking_id}: status is {booking.status}")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot cancel a booking in status {booking.status}"
+        )
+
+    try:
+        booking.status = "CANCELLED"
+        booking.reserved_until = None  # Clear TTL — no longer needed
+
+        transaction = booking_crud.get_latest_transaction(db, booking_id)
+        if transaction and transaction.status in ("pending", "manual_review"):
+            transaction.status = "failed"
+
+        audit = AuditLog(
+            actor_id=booking.user_id,
+            role="system",
+            action="PAYMENT_CANCELLED",
+            resource_id=str(booking_id),
+            metadata_json={
+                "previous_status": booking.status,
+                "reason": "PayNow IPN reported cancelled/failed",
+                "cancelled_at": _get_zim_now().isoformat(),
+            },
+        )
+        db.add(audit)
+        db.commit()
+        logger.info(f"Booking {booking_id} cancelled — slot released")
+        return {"status": "CANCELLED", "booking_id": booking_id}
+
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error(f"Cancel commit failed for booking {booking_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Cancel state transition failed")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  GET|POST /api/book/cleanup-expired
 #  Vercel cron calls this every 5 minutes to release stuck PENDING slots.
 #  GET  → used by Vercel cron (crons only support GET).
@@ -398,7 +463,54 @@ def get_payment_status(
                 },
             }
 
-        # ── Still pending ────────────────────────────────────────────────
+        # ── Still pending: actively check PayNow poll_url as IPN fallback ──
+        # The IPN webhook is the primary signal. On every poll call we also
+        # query PayNow directly so a cancelled or paid status is captured
+        # immediately without waiting for the IPN or the TTL to expire.
+        if transaction.poll_url:
+            try:
+                import httpx as _httpx
+                paynow_svc = os.getenv("PAYNOW_SERVICE_URL", "")
+                if paynow_svc:
+                    with _httpx.Client(timeout=8.0) as client:
+                        pn_resp = client.get(
+                            f"{paynow_svc}/api/payments/check-status",
+                            params={"poll_url": transaction.poll_url},
+                        )
+                    if pn_resp.status_code == 200:
+                        pn_status = (pn_resp.json().get("status") or "").lower()
+                        if pn_status in ("paid", "awaiting delivery", "delivered"):
+                            booking.status = "CONFIRMED"
+                            transaction.status = "completed"
+                            booking.reserved_until = None
+                            try:
+                                db.commit()
+                            except Exception:
+                                db.rollback()
+                            return {
+                                "bookingId": booking_id,
+                                "status": "PAID",
+                                "transactionRef": transaction.provider_ref or transaction.paynow_ref,
+                            }
+                        elif pn_status in ("cancelled", "failed"):
+                            booking.status = "CANCELLED"
+                            transaction.status = "failed"
+                            booking.reserved_until = None
+                            try:
+                                db.commit()
+                            except Exception:
+                                db.rollback()
+                            return {
+                                "bookingId": booking_id,
+                                "status": "REJECTED",
+                                "error": {
+                                    "code": "PAYMENT_CANCELLED",
+                                    "message": "Payment was cancelled or rejected.",
+                                },
+                            }
+            except Exception as poll_exc:
+                logger.warning(f"PayNow active poll failed for booking {booking_id}: {poll_exc}")
+
         return {
             "bookingId": booking_id,
             "status": "PENDING",
