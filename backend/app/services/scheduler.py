@@ -25,8 +25,23 @@ class SchedulerService:
         """Returns the current time in Zimbabwe (Gweru)."""
         return datetime.now(ZIMBABWE_TZ)
 
+    def _is_active(self, booking, now: datetime) -> bool:
+        """A booking holds a slot only if it is not cancelled/rejected AND
+        not an expired PENDING reservation (TTL elapsed)."""
+        if booking.status in ("CANCELLED", "REJECTED"):
+            return False
+        if (
+            booking.status == "PENDING"
+            and booking.reserved_until is not None
+            and booking.reserved_until.replace(tzinfo=None) < now.replace(tzinfo=None)
+        ):
+            return False  # TTL expired — treat slot as free
+        return True
+
     def get_booked_times(self, db: Session, target_date: date) -> List[time]:
-        """Returns a list of already booked or manually blocked times for a specific date."""
+        """Returns a list of actively held times for a specific date.
+        Excludes CANCELLED, REJECTED, and TTL-expired PENDING rows."""
+        now = self.get_zimbabwe_now()
         bookings = db.query(Booking).filter(
             Booking.booking_date == target_date,
             Booking.status.notin_(["CANCELLED", "REJECTED"])
@@ -36,6 +51,8 @@ class SchedulerService:
         booked_times = []
         # Parse active bookings
         for b in bookings:
+            if not self._is_active(b, now):
+                continue
             try:
                 t = datetime.strptime(b.slot_time, "%H:%M").time()
                 booked_times.append(t)
@@ -84,8 +101,10 @@ class SchedulerService:
         bookings = db.query(Booking).filter(Booking.booking_date == target_date).all()
         blocks = db.query(BlockedSlot).filter(BlockedSlot.date == target_date).all()
         
-        # Map for O(1) lookups during generation - Ignore CANCELLED/REJECTED to free up slots
-        booking_times = {b.slot_time for b in bookings if b.status not in ["CANCELLED", "REJECTED"]}
+        # Map for O(1) lookups during generation.
+        # Ignores CANCELLED, REJECTED, and TTL-expired PENDING rows.
+        now = self.get_zimbabwe_now()
+        booking_times = {b.slot_time for b in bookings if self._is_active(b, now)}
         block_map = {bl.slot_time: bl for bl in blocks}
         
         current_time = datetime.combine(target_date, self.START_TIME)
