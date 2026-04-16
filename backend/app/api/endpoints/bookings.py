@@ -26,6 +26,7 @@ class PaymentStatusResponse(BaseModel):
     status: str # PENDING, PAID, REJECTED, EXPIRED, ERROR
     transactionRef: Optional[str] = None
     error: Optional[dict] = None
+    expectedAmount: Optional[float] = None  # P2: Canonical amount for webhook amount-verification
 
 
 
@@ -157,6 +158,10 @@ def create_booking(req: BookingCreate, db: db_dependency, request: Request, user
         except Exception:
             db.rollback()
             raise
+
+        # P1: Attach the server-authoritative price to the response so the frontend
+        # passes this exact amount to Paynow /initiate instead of its own calculation.
+        new_booking.canonical_amount = canonical_amount if not is_cash else None
         return new_booking
     except IntegrityError:
         db.rollback()
@@ -226,7 +231,11 @@ def get_available_slots(db: db_dependency, date: Optional[date] = None) -> List[
     return scheduler.get_all_slots(db, date)
 
 @router.get("/", response_model=List[BookingSchema])
-def list_bookings(db: db_dependency, booking_date: Optional[date] = None) -> List[Booking]:
+def list_bookings(db: db_dependency, booking_date: Optional[date] = None, user: dict = Depends(get_current_user)) -> List[Booking]:
+    # HIGH-4: Restrict full booking list to admin/owner only — previously unauthenticated,
+    # leaking all customer names, Clerk user IDs, services, and dates to anonymous callers.
+    if user.get("metadata", {}).get("role") not in ["admin", "owner"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Admin access required")
     if booking_date:
         return booking_crud.list_by_date(db, str(booking_date))
     return db.query(Booking).order_by(Booking.booking_date.desc()).all()
@@ -288,20 +297,30 @@ def get_user_bookings(user_id: str, db: db_dependency, user: dict = Depends(get_
     return booking_crud.list_by_user(db, user_id)
 
 @router.get("/{booking_id}/payment-status", response_model=PaymentStatusResponse)
-def get_payment_status(booking_id: int, db: db_dependency, user: dict = Depends(get_current_user)) -> dict:
+def get_payment_status(booking_id: int, request: Request, db: db_dependency, user: dict = Depends(get_current_user)) -> dict:
     """
     Refined Status Hub: Orchestrates the transition from PENDING to either CONFIRMED or CANCELLED
     based on the financial outcome. Fills the contract-driven intent for graceful failure.
+
+    Internal callers (Paynow webhook service) may bypass Clerk auth using X-Internal-Secret.
+    This allows the webhook to verify idempotency and expected amount before confirming.
     """
     try:
         booking = booking_crud.get_by_id(db, booking_id)
         if not booking:
             raise HTTPException(status_code=404, detail="Booking not found")
 
-        # CRIT-4: Ownership check — only the booking owner or admin/owner can poll payment status.
-        is_admin = user.get("metadata", {}).get("role") in ["admin", "owner"]
-        if booking.user_id != user.get("sub") and not is_admin:
-            raise HTTPException(status_code=403, detail="Forbidden: You do not own this booking")
+        # P2/P4: Allow internal service callers (Paynow webhook) to bypass Clerk ownership
+        # check using the shared internal secret. External callers still require ownership.
+        internal_secret = os.getenv("INTERNAL_API_SECRET", "")
+        caller_secret = request.headers.get("X-Internal-Secret", "")
+        is_internal = internal_secret and caller_secret == internal_secret
+
+        if not is_internal:
+            # CRIT-4: Ownership check — only the booking owner or admin/owner can poll payment status.
+            is_admin = user.get("metadata", {}).get("role") in ["admin", "owner"]
+            if booking.user_id != user.get("sub") and not is_admin:
+                raise HTTPException(status_code=403, detail="Forbidden: You do not own this booking")
 
         transaction = booking_crud.get_latest_transaction(db, booking_id)
 
@@ -313,9 +332,13 @@ def get_payment_status(booking_id: int, db: db_dependency, user: dict = Depends(
                 "transactionRef": None
             }
 
+        # P2: Canonical expected amount — exposed so the Paynow webhook can verify
+        # the paid amount matches before confirming. Always present when a transaction exists.
+        expected_amount = transaction.amount
+
         # Safe detection of REJECTED/CANCELLED states
         is_rejected = transaction.status in ["cancelled", "rejected", "failed"]
-        
+
         if is_rejected:
             # Shift-Left Logic: If payment is dead, release the resource (the slot)
             if booking.status != "CANCELLED":
@@ -325,10 +348,11 @@ def get_payment_status(booking_id: int, db: db_dependency, user: dict = Depends(
                 except Exception:
                     db.rollback()
                     raise
-            
+
             return {
                 "bookingId": booking_id,
                 "status": "REJECTED",
+                "expectedAmount": expected_amount,
                 "error": {
                     "code": f"PAYMENT_{transaction.status.upper()}",
                     "message": "The payment process was not completed successfully."
@@ -340,13 +364,15 @@ def get_payment_status(booking_id: int, db: db_dependency, user: dict = Depends(
             return {
                 "bookingId": booking_id,
                 "status": "PAID",
-                "transactionRef": transaction.provider_ref
+                "transactionRef": transaction.provider_ref,
+                "expectedAmount": expected_amount,
             }
 
         return {
             "bookingId": booking_id,
             "status": "PENDING",
-            "transactionRef": transaction.poll_url
+            "transactionRef": transaction.poll_url,
+            "expectedAmount": expected_amount,
         }
 
     except Exception as e:

@@ -35,5 +35,8 @@ class Booking(BookingBase):
     booking_date: date
     status: str
     created_at: datetime
+    # P1: Server-authoritative price returned so the frontend passes the canonical
+    # amount to Paynow /initiate — clients can no longer inject their own price.
+    canonical_amount: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)

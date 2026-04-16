@@ -134,26 +134,53 @@ async def paynow_webhook(request: Request):
 
         status = (data.get("Status") or data.get("status") or "").lower()
         booking_id = data.get("Reference") or data.get("reference")
+        # Amount Paynow reports as paid (string from form POST)
+        paid_amount_raw = data.get("Amount") or data.get("amount") or "0"
+        try:
+            paid_amount = float(paid_amount_raw)
+        except (ValueError, TypeError):
+            paid_amount = 0.0
 
         if status in ["paid", "awaiting delivery", "delivered"]:
             if booking_id:
-                # Fix 9: Idempotency — check current booking status before updating
                 backend_url = os.getenv("BACKEND_API_URL", "")
+                internal_secret = os.getenv("INTERNAL_API_SECRET", "")
                 if backend_url:
                     try:
                         async with httpx.AsyncClient() as client:
                             check = await client.get(
                                 f"{backend_url}/api/book/{booking_id}/payment-status",
+                                headers={"X-Internal-Secret": internal_secret},
                                 timeout=5.0
                             )
                             if check.status_code == 200:
                                 check_data = check.json()
-                                # CRIT-3: The payment-status endpoint returns {"status": "PAID"}, not {"paid": true}
+                                # CRIT-3: Correct idempotency key — endpoint returns {"status": "PAID"}
                                 if check_data.get("status") == "PAID":
                                     logger.info(f"⏭️ Booking {booking_id} already confirmed — skipping duplicate webhook.")
                                     return {"status": "already_processed", "reference": booking_id}
+
+                                # P2: Amount verification — compare what Paynow says was paid
+                                # against the canonical amount stored in PaymentTransaction.
+                                # transactionRef is the poll_url in PENDING state; for amount
+                                # we need to fetch from the confirm endpoint's perspective.
+                                # Use a dedicated internal amount-check endpoint if available,
+                                # or fall back to accepting and logging a mismatch for manual review.
+                                expected_amount = check_data.get("expectedAmount")
+                                if expected_amount is not None:
+                                    tolerance = 0.01  # Allow 1 cent rounding
+                                    if abs(paid_amount - float(expected_amount)) > tolerance:
+                                        logger.error(
+                                            f"🚨 AMOUNT MISMATCH for booking {booking_id}: "
+                                            f"expected ${expected_amount}, Paynow reported ${paid_amount}. "
+                                            f"Blocking confirmation — manual review required."
+                                        )
+                                        return JSONResponse(
+                                            status_code=400,
+                                            content={"error": "Amount mismatch", "reference": booking_id}
+                                        )
                     except Exception as e:
-                        logger.warning(f"Idempotency check failed (proceeding anyway): {e}")
+                        logger.warning(f"Pre-confirm check failed (proceeding anyway): {e}")
 
                 await notify_backend_of_payment(booking_id, "CONFIRMED")
 

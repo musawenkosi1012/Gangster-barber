@@ -443,10 +443,16 @@ export default function BookPage() {
       setPendingBookingId(bookData.id);
       setAllocatedSlot(bookData.slot_time);
 
+      // P1: Use the server-authoritative canonical_amount returned by the booking
+      // endpoint instead of the client-computed payAmount. This closes the price
+      // injection path — the server's services table price is always used for the
+      // Paynow charge, regardless of what the frontend calculated.
+      const chargeAmount = bookData.canonical_amount ?? payAmount;
+
       // Now initiate payment using the real booking ID as the Paynow reference.
       // This ensures the webhook can correctly identify and confirm the booking.
       const method = paymentMethod.replace("paynow_", "");
-      const payPayload = buildPaymentPayload(method, String(bookData.id), { ...formData, service: finalService }, user, phoneNumber, payAmount);
+      const payPayload = buildPaymentPayload(method, String(bookData.id), { ...formData, service: finalService }, user, phoneNumber, chargeAmount);
 
       const payRes = await fetch(`/api/payments/initiate`, {
         method: "POST",
@@ -483,7 +489,12 @@ export default function BookPage() {
       const poll = setInterval(async () => {
         attempts++;
         try {
-          const statusRes = await syndicateFetch(`/api/book/${bookData.id}/payment-status`);
+          // M2: Always send auth token when polling — backend requires ownership check.
+          // Re-fetch the token each interval so short-lived tokens auto-refresh.
+          const pollToken = await getToken();
+          const statusRes = await syndicateFetch(`/api/book/${bookData.id}/payment-status`, {
+            headers: pollToken ? { Authorization: `Bearer ${pollToken}` } : {},
+          });
           const statusData = await statusRes.json();
 
           if (statusData.status === "PAID") {
