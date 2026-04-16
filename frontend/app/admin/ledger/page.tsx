@@ -7,7 +7,8 @@ import { syndicateFetch } from "@/utils/api";
 interface Transaction {
   id: number;
   provider: string;
-  provider_ref: string;
+  provider_ref: string | null;   // Real PayNow ref — only set after a successful IPN
+  paynow_ref: string | null;     // Internal UUID — set at initiation, always present for new txs
   status: string;
   amount: number;
   created_at: string;
@@ -110,7 +111,22 @@ export default function AdminLedger() {
                   {transactions.map((tx) => (
                     <tr key={tx.id} className="group hover:bg-white/[0.01] transition-colors">
                        <td className="px-8 py-6">
-                          <code className="text-xs font-black tracking-tighter italic text-white group-hover:text-red-500 transition-colors">{tx.provider_ref || 'NO REF'}</code>
+                          {tx.provider_ref ? (
+                            // Real PayNow reference — payment confirmed
+                            <code className="text-xs font-black tracking-tighter italic text-white group-hover:text-red-500 transition-colors">
+                              {tx.provider_ref}
+                            </code>
+                          ) : tx.paynow_ref ? (
+                            // Internal UUID — initiated but not yet paid / failed
+                            <div className="flex flex-col gap-0.5">
+                              <code className="text-[9px] font-black tracking-tighter text-white/20 truncate max-w-[120px]" title={tx.paynow_ref}>
+                                {tx.paynow_ref.split('-')[0].toUpperCase()}…
+                              </code>
+                              <span className="text-[7px] font-black uppercase tracking-widest text-white/10">Internal ID</span>
+                            </div>
+                          ) : (
+                            <span className="text-[9px] font-black uppercase tracking-widest text-white/10">No Ref</span>
+                          )}
                        </td>
                        <td className="px-8 py-6">
                           <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{tx.provider}</span>
@@ -165,11 +181,20 @@ export default function AdminLedger() {
 
               <div className="space-y-12">
                  <div className="p-8 rounded-3xl bg-white/[0.02] border border-white/5 space-y-4">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40">Reference Meta</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40">Transaction Detail</p>
                     <div className="grid grid-cols-2 gap-8">
                        <div>
-                          <p className="text-xs font-black italic text-white mb-0.5">{selectedTx.provider_ref}</p>
-                          <p className="text-[8px] font-bold text-white/10 uppercase tracking-widest">Ref Code</p>
+                          {selectedTx.provider_ref ? (
+                            <>
+                              <p className="text-xs font-black italic text-emerald-400 mb-0.5">{selectedTx.provider_ref}</p>
+                              <p className="text-[8px] font-bold text-white/10 uppercase tracking-widest">PayNow Ref</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-[9px] font-black italic text-white/30 mb-0.5 break-all">{selectedTx.paynow_ref || '—'}</p>
+                              <p className="text-[8px] font-bold text-white/10 uppercase tracking-widest">Internal ID (no PayNow ref yet)</p>
+                            </>
+                          )}
                        </div>
                        <div>
                           <p className="text-xs font-black italic text-white mb-0.5">${selectedTx.amount}</p>
