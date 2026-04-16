@@ -4,31 +4,31 @@
  * /payment-return
  * ───────────────
  * Landing page for Web Pay (redirect-based) payments.
- * PayNow sends the user back here after they complete or cancel payment on
- * the Paynow website.  The actual payment status is determined by polling
- * the backend — NOT by trusting the URL parameters (those can be spoofed).
+ * PayNow sends the user back here after they complete or cancel payment.
  *
- * Flow:
- *   1. User is redirected here from PayNow with ?bookingId=<id> in the URL.
- *   2. We poll /api/book/{id}/payment-status until we get PAID, REJECTED,
- *      or EXPIRED — or until the 5-minute timeout is reached.
- *   3. We show the appropriate success / failure UI.
+ * IMPORTANT: useSearchParams() requires a <Suspense> boundary in Next.js 13+.
+ * The component that calls useSearchParams is isolated to <PaymentReturnContent>
+ * and wrapped in <Suspense> by the default export.
  */
 
-import { useEffect, useState, useCallback } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { syndicateFetch } from "@/utils/api";
 
 type ReturnStatus = "checking" | "success" | "failed" | "expired" | "error";
 
-export default function PaymentReturnPage() {
+// ── Inner component — uses useSearchParams (must be inside Suspense) ─────────
+function PaymentReturnContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { getToken } = useAuth();
 
-  const bookingId = searchParams.get("bookingId");
+  // Primary: bookingId from URL query param (?bookingId=123)
+  // Fallback: sessionStorage set just before the Web Pay redirect
+  const bookingId =
+    searchParams.get("bookingId") ||
+    (typeof window !== "undefined" ? sessionStorage.getItem("pendingBookingId") : null);
 
   const [status, setStatus] = useState<ReturnStatus>("checking");
   const [transactionRef, setTransactionRef] = useState<string | null>(null);
@@ -37,7 +37,7 @@ export default function PaymentReturnPage() {
   const pollStatus = useCallback(async () => {
     if (!bookingId) {
       setStatus("error");
-      setErrorMessage("No booking ID found in the return URL.");
+      setErrorMessage("No booking ID found. Please check your dashboard.");
       return;
     }
 
@@ -55,6 +55,8 @@ export default function PaymentReturnPage() {
 
         if (data.status === "PAID") {
           clearInterval(poll);
+          // Clean up sessionStorage on success
+          sessionStorage.removeItem("pendingBookingId");
           setTransactionRef(data.transactionRef ?? null);
           setStatus("success");
           return;
@@ -87,12 +89,12 @@ export default function PaymentReturnPage() {
     pollStatus();
   }, [pollStatus]);
 
-  // ── UI ──────────────────────────────────────────────────────────────────
+  // ── UI ────────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center px-6">
       <div className="max-w-md w-full bg-white/5 border border-white/10 rounded-3xl p-10 text-center">
 
-        {/* ── Checking ── */}
+        {/* Checking */}
         {status === "checking" && (
           <>
             <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
@@ -106,7 +108,7 @@ export default function PaymentReturnPage() {
           </>
         )}
 
-        {/* ── Success ── */}
+        {/* Success */}
         {status === "success" && (
           <>
             <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center text-3xl">
@@ -128,7 +130,7 @@ export default function PaymentReturnPage() {
           </>
         )}
 
-        {/* ── Failed ── */}
+        {/* Failed */}
         {status === "failed" && (
           <>
             <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-3xl">
@@ -147,7 +149,7 @@ export default function PaymentReturnPage() {
           </>
         )}
 
-        {/* ── Expired ── */}
+        {/* Expired / manual review */}
         {status === "expired" && (
           <>
             <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-3xl">
@@ -166,7 +168,7 @@ export default function PaymentReturnPage() {
           </>
         )}
 
-        {/* ── Error ── */}
+        {/* Error */}
         {status === "error" && (
           <>
             <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-3xl">
@@ -184,5 +186,32 @@ export default function PaymentReturnPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// ── Loading skeleton shown while Suspense resolves ───────────────────────────
+function PaymentReturnSkeleton() {
+  return (
+    <div className="min-h-screen bg-black text-white flex items-center justify-center px-6">
+      <div className="max-w-md w-full bg-white/5 border border-white/10 rounded-3xl p-10 text-center">
+        <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+          <svg className="w-7 h-7 text-amber-400 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+          </svg>
+        </div>
+        <h1 className="text-2xl font-black uppercase tracking-tighter mb-2">Loading…</h1>
+      </div>
+    </div>
+  );
+}
+
+// ── Default export — wraps the inner component in Suspense ───────────────────
+// Required by Next.js whenever useSearchParams() is used in a page component.
+export default function PaymentReturnPage() {
+  return (
+    <Suspense fallback={<PaymentReturnSkeleton />}>
+      <PaymentReturnContent />
+    </Suspense>
   );
 }
