@@ -31,9 +31,9 @@ export default function Footer() {
         {/* Contact */}
         <div className="flex flex-col gap-3 text-white/50">
           <span className="text-white mb-1 underline underline-offset-4 decoration-red-600">Contact</span>
-          <a href="https://wa.me/263773772047" target="_blank" className="hover:text-red-600 transition normal-case tracking-normal text-xs">WhatsApp: +263 773 772 047</a>
-          <a href="https://instagram.com" target="_blank" className="hover:text-red-600 transition">Instagram</a>
-          <a href="https://tiktok.com" target="_blank" className="hover:text-red-600 transition">TikTok</a>
+          <a href={`https://wa.me/${BRAND.barber.whatsapp}`} target="_blank" className="hover:text-red-600 transition normal-case tracking-normal text-xs">WhatsApp: +{BRAND.barber.whatsapp}</a>
+          <a href={`https://instagram.com/${BRAND.barber.instagram}`} target="_blank" className="hover:text-red-600 transition normal-case tracking-normal text-xs">Instagram: {BRAND.barber.instagram}</a>
+          <a href={`https://facebook.com/${BRAND.barber.facebook}`} target="_blank" className="hover:text-red-600 transition normal-case tracking-normal text-xs">Facebook: {BRAND.barber.facebook}</a>
         </div>
 
         {/* Hours */}
@@ -67,21 +67,36 @@ export default function Footer() {
 
       {/* Developer Signature */}
       <div className="max-w-6xl mx-auto mt-12 pt-8 border-t border-white/5">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-[9px] tracking-[0.2em] text-white/20 normal-case">
-          <span className="tracking-normal text-[10px]">
-            Want a website like this? Contact{" "}
-            <a href="mailto:sukanovtech@gmail.com" className="text-red-600/60 hover:text-red-500 transition underline underline-offset-2">sukanovtech@gmail.com</a>
-          </span>
-          <div className="flex flex-wrap items-center gap-4 text-white/25">
-            <div>
-              <p className="mb-2 text-white italic">WhatsApp/Call</p>
-              <p>{BRAND.contact.phone}</p>
+        <div className="flex flex-col gap-6">
+          {/* Dev Signature */}
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-[9px] tracking-[0.2em] text-white/20 normal-case">
+            <span className="tracking-normal text-[10px] font-bold text-white/60">
+              💻 Website Design & Development by{" "}
+              <a href={`https://www.${BRAND.developer.website}`} target="_blank" className="text-red-600/80 hover:text-red-500 transition underline underline-offset-2">
+                {BRAND.developer.name}
+              </a>
+            </span>
+            <div className="flex flex-wrap items-center gap-6 text-white/30">
+              <div>
+                <p className="mb-2 text-white/60 italic text-xs">WhatsApp/Call</p>
+                <p className="normal-case tracking-normal text-[10px]">{BRAND.developer.phone}</p>
+              </div>
+              <div>
+                <p className="mb-2 text-white/60 italic text-xs">Email</p>
+                <a href={`mailto:${BRAND.developer.email}`} className="normal-case tracking-normal text-[10px] hover:text-red-600 transition underline underline-offset-2">
+                  {BRAND.developer.email}
+                </a>
+              </div>
+              <a href={`https://instagram.com/${BRAND.developer.instagram}`} target="_blank" className="hover:text-red-600 transition text-[10px] normal-case tracking-normal">
+                @{BRAND.developer.instagram}
+              </a>
+              <a href={`https://facebook.com/${BRAND.developer.facebook}`} target="_blank" className="hover:text-red-600 transition text-[10px] normal-case tracking-normal">
+                {BRAND.developer.facebook}
+              </a>
+              <a href={`https://www.${BRAND.developer.website}`} target="_blank" className="hover:text-red-600 transition text-[10px] normal-case tracking-normal">
+                {BRAND.developer.website}
+              </a>
             </div>
-            <div>
-              <p className="mb-2 text-white italic">Email Dispatch</p>
-              <p className="normal-case tracking-normal">{BRAND.contact.email}</p>
-            </div>
-            <a href="https://instagram.com/sukaravtech" target="_blank" className="hover:text-red-600 transition">@sukaravtech</a>
           </div>
         </div>
       </div>
