@@ -4,40 +4,37 @@ from typing import Optional
 
 class InitiatePaymentRequest(BaseModel):
     """Request body for initiating a payment."""
-    # booking_id is a UUID reference string generated before the booking is saved
-    # This avoids sending 'Appointment #0' to Paynow
-    booking_id: str
+    booking_id: str           # paynow_ref UUID — used as PayNow reference string
     customer_name: str
     customer_email: str
     service: str
     amount: float
-    # For mobile (EcoCash / OneMoney / InnBucks / O'Mari) payments
     phone_number: Optional[str] = None
-    # VMC and ZimSwitch disabled until real card tokenisation is implemented
     payment_method: Optional[str] = "web"  # "web", "mobile", "onemoney", "innbucks", "omari"
+    # Draft token: signed payload carrying all booking fields.
+    # Stored on the PayNow service and forwarded to the backend webhook
+    # so the backend can create the booking row only after payment is confirmed.
+    draft_token: Optional[str] = None
 
 
 class CheckStatusRequest(BaseModel):
-    """Request body for checking a payment status."""
     poll_url: str
 
 
 class OmariOTPRequest(BaseModel):
-    """Request for O'mari Step 2: OTP submission."""
     otp: str
     remote_otp_url: str
 
 
 class PaymentResponse(BaseModel):
-    """Response returned after payment initiation."""
     success: bool
-    status: Optional[str] = None        # Fix 8: was missing, Pydantic was silently dropping it
-    redirect_url: Optional[str] = None  # For web-based payments
+    status: Optional[str] = None
+    redirect_url: Optional[str] = None
     poll_url: Optional[str] = None
-    instructions: Optional[str] = None  # For mobile payments
+    instructions: Optional[str] = None
     error: Optional[str] = None
     payment_method: Optional[str] = None
-    
+
     # Advanced Express Checkout (InnBucks, O'Mari)
     authorization_code: Optional[str] = None
     authorization_expires: Optional[str] = None

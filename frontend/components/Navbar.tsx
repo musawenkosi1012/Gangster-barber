@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { SignInButton, SignOutButton, UserButton, useAuth } from "@clerk/nextjs";
+import { BRAND } from "@/utils/constants";
 
 
 
@@ -84,17 +85,17 @@ export default function Navbar() {
               <span className="text-white/30">Mon-Sun: 7am-7pm</span>
             </div>
             <div className="flex items-center gap-4 ml-auto md:ml-0">
-              <a href="https://wa.me/263773772047" target="_blank" className="flex items-center gap-1.5 text-green-500/50 hover:text-green-400 transition-colors duration-300">
+              <a href={`https://wa.me/${BRAND.barber.whatsapp}`} target="_blank" className="flex items-center gap-1.5 text-green-500/50 hover:text-green-400 transition-colors duration-300">
                 <WhatsAppIcon />
                 <span className="hidden sm:inline">WhatsApp</span>
               </a>
               <span className="text-white/10">|</span>
-              <a href="tel:+263773772047" className="flex items-center gap-1.5 hover:text-white/60 transition-colors duration-300">
+              <a href={`tel:+${BRAND.barber.whatsapp}`} className="flex items-center gap-1.5 hover:text-white/60 transition-colors duration-300">
                 <PhoneIcon />
-                <span className="hidden sm:inline">+263 773 772 047</span>
+                <span className="hidden sm:inline">+{BRAND.barber.whatsapp}</span>
               </a>
               <span className="text-white/10 hidden sm:inline">|</span>
-              <a href="https://instagram.com/sukaravtech" target="_blank" className="flex items-center gap-1.5 hover:text-pink-400/70 transition-colors duration-300">
+              <a href={`https://instagram.com/${BRAND.barber.instagram}`} target="_blank" className="flex items-center gap-1.5 hover:text-pink-400/70 transition-colors duration-300">
                 <InstagramIcon />
               </a>
             </div>

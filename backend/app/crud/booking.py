@@ -19,7 +19,20 @@ class BookingRepository:
 
     @staticmethod
     def list_by_date(db: Session, booking_date: date) -> List[Booking]:
-        return db.query(Booking).filter(Booking.booking_date == booking_date).order_by(Booking.slot_time.asc()).all()
+        """
+        Returns bookings visible to the barber — CONFIRMED and COMPLETED only.
+        PENDING rows (legacy) and CANCELLED rows are excluded.
+        Draft bookings never reach the DB, so they are never shown here.
+        """
+        return (
+            db.query(Booking)
+            .filter(
+                Booking.booking_date == booking_date,
+                Booking.status.in_(["CONFIRMED", "COMPLETED", "VERIFYING", "NO_SHOW"]),
+            )
+            .order_by(Booking.slot_time.asc())
+            .all()
+        )
 
     @staticmethod
     def get_next_arrival(db: Session, target_date: date, min_time: str) -> Optional[Booking]:
