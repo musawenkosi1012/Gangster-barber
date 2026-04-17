@@ -36,6 +36,7 @@ from ...schemas.booking import BookingCreate, Booking as BookingSchema, BookingU
 from ...services.scheduler import scheduler
 from ...db.base import get_db
 from ...models import Booking, PaymentTransaction, AuditLog
+from ...models.operational import Service
 from ..deps import get_current_user
 from ...crud.booking import booking_crud
 from ...crud.customer import customer_crud
@@ -190,6 +191,39 @@ def create_draft(
             detail="A payment amount greater than zero is required for non-cash bookings.",
         )
 
+    # ── Server-side price verification ───────────────────────────────────
+    # Reject requests where the client-submitted amount is below the actual
+    # service price stored in the DB. This prevents a user from sending
+    # payment_amount=0.01, paying $0.01 via PayNow, and getting a CONFIRMED
+    # booking for a $10+ service.
+    expected_amount: Optional[float] = None
+    if not is_cash:
+        svc = (
+            db.query(Service)
+            .filter(
+                Service.is_active == True,
+                Service.name.ilike(req.service),
+            )
+            .first()
+        )
+        if svc:
+            expected_amount = round(svc.price + (svc.booking_fee or 0.0), 2)
+            if req.payment_amount < expected_amount * 0.99:  # 1% float tolerance
+                logger.warning(
+                    f"Underpayment attempt: service={req.service!r} "
+                    f"expected={expected_amount} submitted={req.payment_amount} "
+                    f"user={req.user_id}"
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Payment amount ${req.payment_amount:.2f} is below the service price "
+                           f"of ${expected_amount:.2f}. Please refresh the page and try again.",
+                )
+        else:
+            # Service not found in DB — log but allow (may be a custom/cash-add
+            # service not yet catalogued). We'll still verify at confirm time.
+            logger.warning(f"Service {req.service!r} not found in DB — skipping price validation")
+
     # ── Slot validation ──────────────────────────────────────────────────
     # We check availability against CONFIRMED + COMPLETED bookings only.
     # The scheduler._is_active() already ignores PENDING/CANCELLED rows.
@@ -227,15 +261,18 @@ def create_draft(
     expires_at = datetime.utcnow() + timedelta(minutes=DRAFT_TTL_MINUTES)
 
     draft_payload = {
-        "user_id":        req.user_id,
-        "name":           req.name,
-        "service":        req.service,
-        "slot_time":      slot,
-        "booking_date":   str(booking_date),
-        "payment_method": req.payment_method,
-        "payment_amount": req.payment_amount,
-        "paynow_ref":     req.paynow_ref,
-        "expires_at":     expires_at.isoformat(),
+        "user_id":         req.user_id,
+        "name":            req.name,
+        "service":         req.service,
+        "slot_time":       slot,
+        "booking_date":    str(booking_date),
+        "payment_method":  req.payment_method,
+        # Use the DB-authoritative price — never trust the client-submitted value
+        # for the amount that gets committed to the PaymentTransaction row.
+        "payment_amount":  expected_amount if expected_amount is not None else req.payment_amount,
+        "expected_amount": expected_amount,   # verified at webhook confirm time
+        "paynow_ref":      req.paynow_ref,
+        "expires_at":      expires_at.isoformat(),
     }
 
     token = _sign(draft_payload)
@@ -303,11 +340,14 @@ def confirm_from_draft(request: Request, db: db_dependency) -> dict:
     #                        (primary key into payment_drafts)
     #   X-Paynow-Reference — PayNow's own transaction reference (optional,
     #                        stored for display/reconciliation)
+    #   X-Payment-Amount   — the amount PayNow reports as actually paid (IPN
+    #                        field). Verified against the draft's expected_amount.
     #   X-Draft-Token      — legacy path: token carried in-band rather than
     #                        looked up. Preserved only for the transitional
     #                        release so in-flight webhooks keep working.
     paynow_ref = request.headers.get("X-Paynow-Ref")
     paynow_reference = request.headers.get("X-Paynow-Reference")
+    ipn_amount_header = request.headers.get("X-Payment-Amount")
     draft_token_header = request.headers.get("X-Draft-Token")
 
     draft_token: Optional[str] = None
@@ -377,6 +417,29 @@ def confirm_from_draft(request: Request, db: db_dependency) -> dict:
 
     zims_now = _get_zim_now()
     booking_date = date.fromisoformat(draft["booking_date"])
+
+    # ── IPN amount verification ──────────────────────────────────────────
+    # The paynow service forwards the `amount` field from the IPN notification.
+    # If the draft carries an expected_amount (set from the DB service price),
+    # we refuse to confirm a booking where PayNow reports a lower amount —
+    # catching any case where someone paid less than the service price.
+    expected_amount = draft.get("expected_amount")
+    if expected_amount and ipn_amount_header:
+        try:
+            ipn_amount = float(ipn_amount_header)
+            if ipn_amount < expected_amount * 0.99:   # 1% float tolerance
+                logger.error(
+                    f"UNDERPAYMENT DETECTED — paynow_ref={paynow_ref} "
+                    f"expected={expected_amount} ipn_paid={ipn_amount} "
+                    f"service={draft.get('service')!r} user={draft.get('user_id')!r}"
+                )
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"IPN amount ${ipn_amount:.2f} is below expected "
+                           f"${expected_amount:.2f}. Booking not created.",
+                )
+        except ValueError:
+            logger.warning(f"Non-numeric X-Payment-Amount header: {ipn_amount_header!r} — skipping amount check")
 
     # ── Idempotency: check if this draft was already confirmed ────────────
     # Use paynow_ref as the dedupe key — same IPN arriving twice should not

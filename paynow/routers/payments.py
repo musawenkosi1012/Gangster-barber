@@ -86,15 +86,22 @@ async def _call_backend(path: str, headers: dict, label: str) -> bool:
         return False
 
 
-async def notify_backend_confirmed(paynow_ref: str, paynow_reference: Optional[str]) -> bool:
+async def notify_backend_confirmed(
+    paynow_ref: str,
+    paynow_reference: Optional[str],
+    ipn_amount: Optional[str] = None,
+) -> bool:
     """
     POST /api/book/confirm — creates the booking in DB for the first time.
-    Carries only the paynow_ref; backend looks up & atomically consumes the
-    stored draft row.
+    Carries the paynow_ref (for atomic draft consume) and the IPN-reported
+    amount (X-Payment-Amount) so the backend can verify against the expected
+    service price stored in the draft.
     """
     headers = {"X-Paynow-Ref": paynow_ref}
     if paynow_reference:
         headers["X-Paynow-Reference"] = paynow_reference
+    if ipn_amount:
+        headers["X-Payment-Amount"] = str(ipn_amount)
     return await _call_backend("/api/book/confirm", headers, "Create confirmed booking from draft")
 
 
@@ -174,6 +181,12 @@ async def paynow_webhook(request: Request):
             or data.get("PaynowReference")
             or data.get("PayNowReference")
         )
+        # IPN-reported amount — forwarded to backend for price verification
+        ipn_amount = (
+            data.get("amount")
+            or data.get("Amount")
+            or field_map.get("amount")
+        )
 
         if status in ["paid", "awaiting delivery", "delivered"]:
             if not reference:
@@ -198,8 +211,8 @@ async def paynow_webhook(request: Request):
                     logger.warning(f"Idempotency check failed (proceeding anyway): {exc}")
 
             # ── Forward paynow_ref to backend for atomic draft consume ──
-            logger.info(f"✅ Paid event for ref {reference} — confirming via backend")
-            success = await notify_backend_confirmed(reference, paynow_reference)
+            logger.info(f"✅ Paid event for ref {reference} (amount={ipn_amount}) — confirming via backend")
+            success = await notify_backend_confirmed(reference, paynow_reference, ipn_amount)
             if not success:
                 # Fall back to legacy confirm (reference may be a numeric booking ID
                 # from the pre-draft era — backend handles the lookup).
