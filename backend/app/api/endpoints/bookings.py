@@ -55,11 +55,19 @@ logger = logging.getLogger("bookings")
 router = APIRouter()
 
 # ── Constants ────────────────────────────────────────────────────────────────
-DRAFT_TTL_MINUTES = 10
+DRAFT_TTL_MINUTES = 30   # 30 min gives customers a realistic mobile-payment window
 INTERNAL_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 
-# Signing secret for draft tokens — falls back to INTERNAL_SECRET so no new env var needed
-DRAFT_SIGNING_KEY = os.getenv("DRAFT_SIGNING_KEY", INTERNAL_SECRET or "gangster-barber-draft-key")
+# Signing secret for draft tokens.
+# Preference order: dedicated DRAFT_SIGNING_KEY → INTERNAL_API_SECRET.
+# If neither is set we refuse to start rather than using a hardcoded fallback
+# that is now public knowledge (it was in the git history).
+DRAFT_SIGNING_KEY: str = os.getenv("DRAFT_SIGNING_KEY") or INTERNAL_SECRET
+if not DRAFT_SIGNING_KEY:
+    raise RuntimeError(
+        "Neither DRAFT_SIGNING_KEY nor INTERNAL_API_SECRET is set. "
+        "Refusing to start with a hardcoded fallback — set one of these env vars."
+    )
 
 db_dependency = Annotated[Session, Depends(get_db)]
 

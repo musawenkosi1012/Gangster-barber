@@ -55,9 +55,17 @@ async def verify_request_auth(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(auth_scheme)
 ):
+    # Fail-closed: if the secret is not configured at all, refuse every request
+    # rather than falling through to an open endpoint.
     if not INTERNAL_SECRET:
-        logger.warning("INTERNAL_API_SECRET not set — /initiate is unauthenticated.")
-        return True
+        logger.critical(
+            "INTERNAL_API_SECRET is not set. "
+            "Refusing /initiate — set the env var to enable payments."
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Service misconfigured: INTERNAL_API_SECRET not set on this instance.",
+        )
     if not credentials or credentials.credentials != INTERNAL_SECRET:
         raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing API secret")
     return True

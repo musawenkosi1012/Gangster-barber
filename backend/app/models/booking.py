@@ -1,11 +1,26 @@
-from sqlalchemy import Column, Integer, String, Date, DateTime, func, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Date, DateTime, func, Index
+from sqlalchemy import text as sa_text
 from ..db.base import Base
 
 class Booking(Base):
     __tablename__ = "bookings"
+    # Partial unique index — only active/in-progress statuses are constrained.
+    # CANCELLED rows are excluded so the same slot can be re-booked after a
+    # cancellation without an IntegrityError.
+    # The DDL for this index lives in migrations/add_active_slot_unique_index.sql.
+    # SQLAlchemy doesn't enforce the WHERE clause itself (it's DB-side only),
+    # but declaring it here keeps schema intent visible in the model.
     __table_args__ = (
-        UniqueConstraint('booking_date', 'slot_time', name='_date_slot_uc'),
-        {"schema": "public"}
+        Index(
+            "idx_bookings_active_slot",
+            "booking_date",
+            "slot_time",
+            unique=True,
+            postgresql_where=sa_text(
+                "status NOT IN ('CANCELLED')"
+            ),
+        ),
+        {"schema": "public"},
     )
 
     id = Column(Integer, primary_key=True, index=True)
