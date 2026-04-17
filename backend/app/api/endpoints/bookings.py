@@ -39,8 +39,9 @@ from ...models import Booking, PaymentTransaction, AuditLog
 from ..deps import get_current_user
 from ...crud.booking import booking_crud
 from ...crud.customer import customer_crud
+from ...crud.drafts import draft_crud
 from ...core.limiter import limiter
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional, Annotated
 import os
 import logging
@@ -239,9 +240,36 @@ def create_draft(
 
     token = _sign(draft_payload)
 
+    # ── Persist draft in DB (survives Vercel cold starts) ────────────────
+    # This replaces the old in-process _draft_store dict in the paynow
+    # microservice, which lost drafts whenever /initiate and the webhook
+    # landed on different Lambda instances (i.e. almost always).
+    #
+    # The paynow_ref UUID is generated on the frontend and round-trips
+    # through PayNow as the transaction `Reference` field — so the webhook
+    # can look the draft right back up by the same key.
+    if not req.paynow_ref:
+        raise HTTPException(
+            status_code=400,
+            detail="paynow_ref (client-generated UUID) is required for electronic payments",
+        )
+
+    try:
+        draft_crud.store(
+            db,
+            paynow_ref=req.paynow_ref,
+            draft_token=token,
+            expires_at=expires_at.replace(tzinfo=timezone.utc),
+        )
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error(f"Failed to persist draft for paynow_ref={req.paynow_ref}: {exc}")
+        raise HTTPException(status_code=500, detail="Could not stage booking. Please try again.")
+
     logger.info(
-        f"Draft token issued for {req.name} — slot {slot} on {booking_date} "
-        f"(expires {expires_at.isoformat()}). No DB write."
+        f"Draft persisted for paynow_ref={req.paynow_ref} — slot {slot} on {booking_date} "
+        f"(expires {expires_at.isoformat()}). No Booking row yet."
     )
 
     return {
@@ -270,11 +298,75 @@ def confirm_from_draft(request: Request, db: db_dependency) -> dict:
     if not INTERNAL_SECRET or secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden: Internal Clearance Only")
 
-    draft_token = request.headers.get("X-Draft-Token")
+    # Inputs from the paynow webhook:
+    #   X-Paynow-Ref       — the UUID we put in the PayNow Reference field
+    #                        (primary key into payment_drafts)
+    #   X-Paynow-Reference — PayNow's own transaction reference (optional,
+    #                        stored for display/reconciliation)
+    #   X-Draft-Token      — legacy path: token carried in-band rather than
+    #                        looked up. Preserved only for the transitional
+    #                        release so in-flight webhooks keep working.
+    paynow_ref = request.headers.get("X-Paynow-Ref")
     paynow_reference = request.headers.get("X-Paynow-Reference")
+    draft_token_header = request.headers.get("X-Draft-Token")
 
-    if not draft_token:
-        raise HTTPException(status_code=400, detail="Missing X-Draft-Token header")
+    draft_token: Optional[str] = None
+
+    if paynow_ref:
+        # Preferred path: atomically consume the draft row.
+        # Returns None if the draft is missing, already consumed, or expired —
+        # each case mapped to a distinct response below.
+        consumed = draft_crud.consume(db, paynow_ref)
+
+        if not consumed:
+            # Disambiguate the three failure modes so the webhook can react
+            # appropriately (duplicate vs forged vs too-late).
+            existing = draft_crud.peek(db, paynow_ref)
+
+            if existing and existing.consumed_at is not None:
+                # Duplicate webhook for an already-confirmed booking.
+                # Report success so PayNow stops retrying.
+                logger.info(
+                    f"Idempotent confirm — draft {paynow_ref} already consumed "
+                    f"at {existing.consumed_at.isoformat()}"
+                )
+                # Best-effort: fetch the booking id that was created
+                existing_tx = (
+                    db.query(PaymentTransaction)
+                    .filter(PaymentTransaction.paynow_ref == paynow_ref)
+                    .first()
+                )
+                return {
+                    "status": "CONFIRMED",
+                    "booking_id": existing_tx.booking_id if existing_tx else None,
+                    "idempotent": True,
+                }
+
+            if existing and existing.expires_at and existing.expires_at < datetime.now(timezone.utc):
+                logger.warning(
+                    f"Draft {paynow_ref} expired at {existing.expires_at.isoformat()} "
+                    f"— payment arrived too late"
+                )
+                raise HTTPException(status_code=410, detail="Draft expired before webhook arrived")
+
+            logger.warning(
+                f"Webhook referenced unknown draft {paynow_ref} — "
+                f"possible forgery or already-purged expired draft"
+            )
+            raise HTTPException(status_code=404, detail="Draft not found")
+
+        draft_token = consumed.draft_token
+
+    elif draft_token_header:
+        # Legacy in-band token path. Retained for one release to bridge
+        # any webhooks already queued against the old paynow service.
+        logger.info("Legacy X-Draft-Token path used (transitional)")
+        draft_token = draft_token_header
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing X-Paynow-Ref header (or legacy X-Draft-Token)",
+        )
 
     # ── Decode + verify draft ────────────────────────────────────────────
     try:

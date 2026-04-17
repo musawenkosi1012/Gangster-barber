@@ -1,20 +1,19 @@
 """
 PayNow payment router — Gangster Barber
 ────────────────────────────────────────
-Draft-in-cache architecture:
+Stateless draft architecture:
 
-  /initiate  — receives the signed draft_token from the frontend,
-               stores it in an in-process dict keyed by booking_id (paynow_ref).
-               Passes booking_id as the PayNow reference string.
+  /initiate  — just calls the PayNow gateway. The draft_token has already been
+               persisted server-side by the backend's /api/book/create-draft
+               endpoint, keyed by paynow_ref (booking_id). Nothing is stored
+               here — Vercel Lambdas don't share memory.
 
-  /webhook   — verifies PayNow IPN hash, looks up the stored draft_token,
-               forwards it to the backend's POST /api/book/confirm endpoint.
-               On failure/cancellation → POST /api/book/{id}/cancel (legacy path).
+  /webhook   — verifies PayNow IPN hash, forwards the paynow_ref to the
+               backend's POST /api/book/confirm via the X-Paynow-Ref header.
+               The backend does the atomic draft-consume + booking creation.
 
-Because Vercel is serverless (stateless between invocations), we persist the
-draft_token in the PayNow payment metadata field so the webhook can always
-recover it even across cold starts. The in-process dict is a best-effort cache
-for warm invocations.
+This removed an earlier in-process `_draft_store` dict that silently dropped
+drafts whenever the webhook hit a cold Lambda — almost always, in practice.
 """
 
 from fastapi import APIRouter, Request, HTTPException, Depends, Query
@@ -24,16 +23,12 @@ import logging
 import hashlib
 import os
 import httpx
-from typing import Optional, Dict
+from typing import Optional
 from paynow_client import get_paynow_client
 from schemas import InitiatePaymentRequest, PaymentResponse, CheckStatusRequest, OmariOTPRequest
 
 router = APIRouter()
 logger = logging.getLogger("paynow")
-
-# ── In-process draft token store (warm-instance cache) ───────────────────────
-# key: paynow_ref (UUID string)   value: signed draft_token string
-_draft_store: Dict[str, str] = {}
 
 # ── Rate Limiter ─────────────────────────────────────────────────────────────
 try:
@@ -91,12 +86,13 @@ async def _call_backend(path: str, headers: dict, label: str) -> bool:
         return False
 
 
-async def notify_backend_confirmed(draft_token: str, paynow_reference: Optional[str]) -> bool:
+async def notify_backend_confirmed(paynow_ref: str, paynow_reference: Optional[str]) -> bool:
     """
     POST /api/book/confirm — creates the booking in DB for the first time.
-    Carries the signed draft_token so the backend can decode all booking fields.
+    Carries only the paynow_ref; backend looks up & atomically consumes the
+    stored draft row.
     """
-    headers = {"X-Draft-Token": draft_token}
+    headers = {"X-Paynow-Ref": paynow_ref}
     if paynow_reference:
         headers["X-Paynow-Reference"] = paynow_reference
     return await _call_backend("/api/book/confirm", headers, "Create confirmed booking from draft")
@@ -201,31 +197,21 @@ async def paynow_webhook(request: Request):
                 except Exception as exc:
                     logger.warning(f"Idempotency check failed (proceeding anyway): {exc}")
 
-            # ── Look up draft_token ──────────────────────────────────────
-            draft_token = _draft_store.get(reference)
-
-            if draft_token:
-                # New architecture: create booking in DB for the first time
-                logger.info(f"✅ Draft token found for ref {reference} — creating confirmed booking")
-                success = await notify_backend_confirmed(draft_token, paynow_reference)
-                if success:
-                    # Clean up store entry
-                    _draft_store.pop(reference, None)
-                else:
-                    logger.error(f"Backend confirm failed for draft {reference}")
-            else:
-                # Legacy fallback: reference is a numeric booking ID (pre-draft era)
-                logger.info(f"No draft token for ref {reference} — attempting legacy confirm")
+            # ── Forward paynow_ref to backend for atomic draft consume ──
+            logger.info(f"✅ Paid event for ref {reference} — confirming via backend")
+            success = await notify_backend_confirmed(reference, paynow_reference)
+            if not success:
+                # Fall back to legacy confirm (reference may be a numeric booking ID
+                # from the pre-draft era — backend handles the lookup).
+                logger.info(f"Draft confirm failed for {reference} — trying legacy confirm")
                 await notify_backend_legacy_confirm(reference, paynow_reference)
 
         elif status in ["cancelled", "failed"]:
             if reference:
-                # Draft-token era: the booking may not exist in DB yet — that's fine,
-                # the backend /cancel endpoint returns a no-op response for missing rows.
+                # The booking may not exist in DB yet — that's fine, the backend
+                # /cancel endpoint returns a no-op response for missing rows.
                 logger.info(f"Payment {status} for ref {reference} — notifying backend")
                 await notify_backend_payment_failed(reference)
-                # Also evict from draft store
-                _draft_store.pop(reference, None)
 
         return {"status": "verified", "reference": reference}
 
@@ -244,19 +230,11 @@ async def initiate_payment(
     _auth: bool = Depends(verify_request_auth)
 ):
     """
-    Initiates a PayNow payment.
-    Stores the draft_token in the in-process cache keyed by booking_id (paynow_ref).
-    The draft_token is forwarded to the backend on webhook confirmation so the
-    booking is created in the DB for the first time — never before payment.
+    Initiates a PayNow payment. The draft_token is already persisted server-side
+    by the backend's /api/book/create-draft call (keyed by paynow_ref), so
+    nothing needs to be kept here — this service stays fully stateless.
     """
     try:
-        # ── Store draft token for webhook recovery ───────────────────────
-        if req.draft_token:
-            _draft_store[req.booking_id] = req.draft_token
-            logger.info(f"Draft token stored for ref {req.booking_id}")
-        else:
-            logger.warning(f"No draft_token in /initiate for ref {req.booking_id} — legacy flow assumed")
-
         paynow = get_paynow_client()
         payment = paynow.create_payment(str(req.booking_id), req.customer_email)
         payment.add(f"Barber Booking — {req.service}", req.amount)
@@ -289,13 +267,10 @@ async def initiate_payment(
                 otpreference=_str(getattr(response, "otpreference", None)),
             )
         else:
-            # Initiation failed — evict draft so no orphan entry remains
-            _draft_store.pop(req.booking_id, None)
             logger.error(f"PayNow gateway rejected payment: {response.error!r}")
             return PaymentResponse(success=False, status="failed", error=response.error)
 
     except Exception as e:
-        _draft_store.pop(req.booking_id, None)
         logger.error(f"Payment initiation failure: {e}")
         raise HTTPException(status_code=500, detail="Terminal failure during payment initiation.")
 
