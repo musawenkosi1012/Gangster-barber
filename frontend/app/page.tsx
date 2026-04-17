@@ -7,6 +7,7 @@ import Footer from "@/components/Footer";
 import Link from "next/link";
 import { SignInButton, Show } from "@clerk/nextjs";
 import dynamic from "next/dynamic";
+import { BRAND } from "@/utils/constants";
 
 const ThreeScene = dynamic(() => import("@/components/ThreeScene"), { ssr: false });
 
@@ -276,7 +277,7 @@ export default function Home() {
           <div className="mt-16 text-center">
             <p className="text-gray-500 text-xs uppercase tracking-widest font-bold mb-6">Still have questions? Reach out on WhatsApp</p>
             <a
-              href="https://wa.me/263773772047"
+              href={`https://wa.me/${BRAND.barber.whatsapp}`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-block px-10 py-5 border border-white/10 rounded-full text-[11px] font-black uppercase tracking-[0.3em] hover:bg-white hover:text-black transition-all"
