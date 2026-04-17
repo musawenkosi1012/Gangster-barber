@@ -5,6 +5,7 @@ export const BRAND = {
     name: "Maybongwe Sithole",
     phone: "0785139533",
     whatsapp: "263785139533",
+    email: "Gangasterbarbermobilebarber@gmail.com",
     facebook: "Maybongwe Sithole",
     instagram: "gangsterbarber21",
   },
