@@ -32,6 +32,7 @@ export default function Footer() {
         <div className="flex flex-col gap-3 text-white/50">
           <span className="text-white mb-1 underline underline-offset-4 decoration-red-600">Contact</span>
           <a href={`https://wa.me/${BRAND.barber.whatsapp}`} target="_blank" className="hover:text-red-600 transition normal-case tracking-normal text-xs">WhatsApp: +{BRAND.barber.whatsapp}</a>
+          <a href={`mailto:${BRAND.barber.email}`} className="hover:text-red-600 transition normal-case tracking-normal text-xs">Email: {BRAND.barber.email}</a>
           <a href={`https://instagram.com/${BRAND.barber.instagram}`} target="_blank" className="hover:text-red-600 transition normal-case tracking-normal text-xs">Instagram: {BRAND.barber.instagram}</a>
           <a href={`https://facebook.com/${BRAND.barber.facebook}`} target="_blank" className="hover:text-red-600 transition normal-case tracking-normal text-xs">Facebook: {BRAND.barber.facebook}</a>
         </div>
