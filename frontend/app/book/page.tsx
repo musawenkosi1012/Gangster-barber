@@ -244,7 +244,7 @@ export default function BookPage() {
 
   // Form
   const [formData, setFormData] = useState<BookingFormData>({ name: "", phone: "", service: "", date: "", time: "" });
-  const [paymentMethod, setPaymentMethod] = useState<"paynow_mobile" | "paynow_onemobile" | "paynow_innbucks" | "paynow_omari">("paynow_mobile");
+  const [paymentMethod, setPaymentMethod] = useState<"paynow_mobile" | "paynow_onemobile" | "paynow_innbucks" | "paynow_omari" | "paynow_web" | "cash">("paynow_mobile");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [payForCut, setPayForCut] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
