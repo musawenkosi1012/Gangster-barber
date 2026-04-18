@@ -11,7 +11,7 @@ from ...models.crm import Customer as CustomerModel
 from ...models.booking import Booking as BookingModel
 from ...models.technical import AuditLog
 from ...schemas.crm import Customer, CustomerCreate, CustomerUpdate, CustomerDetail
-from ..deps import get_current_admin, require_role
+from ..deps import get_current_admin, require_role, get_current_user
 
 router = APIRouter(prefix="/api/v1/admin/customers", tags=["CRM"])
 
@@ -28,6 +28,41 @@ def check_nickname(name: str = Query(..., min_length=2, max_length=40), db: Sess
         func.lower(CustomerModel.full_name) == clean.lower()
     ).first()
     return {"available": exists is None}
+
+@public_router.post("/register-nickname")
+def register_nickname(
+    clerk_id: str = Query(...),
+    name: str = Query(..., min_length=2, max_length=40),
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> dict:
+    """Creates/updates customer record during onboarding with chosen nickname."""
+    if clerk_id != current_user.get("sub"):
+        raise HTTPException(status_code=403, detail="Identity mismatch")
+
+    import re
+    clean = name.strip()
+    if not re.match(r"^[a-zA-Z0-9 '_\-\.]{2,40}$", clean):
+        raise HTTPException(status_code=400, detail="Invalid nickname format")
+
+    try:
+        customer = db.query(CustomerModel).filter(CustomerModel.clerk_id == clerk_id).first()
+        if customer:
+            customer.full_name = clean
+        else:
+            customer = CustomerModel(
+                clerk_id=clerk_id,
+                full_name=clean,
+                status="active",
+                booking_count=0,
+            )
+            db.add(customer)
+        db.commit()
+        db.refresh(customer)
+        return {"id": customer.id, "full_name": customer.full_name}
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to register nickname")
 
 @router.get("/", response_model=List[Customer])
 def list_customers(

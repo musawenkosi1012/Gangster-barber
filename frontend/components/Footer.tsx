@@ -1,12 +1,30 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { BRAND } from "@/utils/constants";
 import { useLegal } from "@/context/LegalContext";
 
 export default function Footer() {
   const { openVault } = useLegal();
+  const [harareTime, setHarareTime] = useState("");
+
+  useEffect(() => {
+    const tick = () => {
+      setHarareTime(
+        new Date().toLocaleTimeString("en-ZW", {
+          timeZone: "Africa/Harare",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+        })
+      );
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
   return (
     <footer className="bg-[#050505] pt-24 pb-10 px-6 md:px-10 text-[#555] text-[10px] font-bold leading-loose uppercase tracking-[0.3em] border-t border-white/5 relative z-10">
       <div className="max-w-6xl mx-auto border-b border-white/5 pb-16 mb-12 flex flex-col md:flex-row justify-between items-start gap-12">
@@ -41,6 +59,11 @@ export default function Footer() {
         <div className="flex flex-col gap-3 text-white/50">
           <span className="text-white mb-1 underline underline-offset-4 decoration-red-600">Hours</span>
           <span className="normal-case tracking-normal text-xs">Mon – Sun: 7am – 7pm</span>
+          {harareTime && (
+            <span className="normal-case tracking-normal text-xs text-white/30">
+              Harare time: <span className="text-red-500 font-mono">{harareTime}</span>
+            </span>
+          )}
         </div>
       </div>
 
