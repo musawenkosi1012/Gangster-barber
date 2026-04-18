@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git branch *)",
+      "Bash(npm run *)",
+      "Bash(curl -s http://localhost:3000/services)",
+      "Bash(lsof -ti:3005)",
+      "Bash(xargs kill *)",
+      "Bash(find \"D:\\\\\\\\gangster barber\\\\\\\\backend\" -name \"*services*\" -o -name \"*service*\")",
+      "Bash(cd \"D:\\\\\\\\gangster barber\")",
+      "Bash(find \"D:\\\\\\\\gangster barber\\\\\\\\frontend\\\\\\\\app\\\\\\\\services\" -name \"*.tsx\")",
+      "Bash(ls -la \"D:\\\\\\\\gangster barber\\\\\\\\.claude\\\\\\\\worktrees\\\\\\\\optimistic-haibt-485073\\\\\\\\frontend\\\\\\\\components\\\\\\\\pages\\\\\\\\\")",
+      "Bash(cd \"D:\\\\\\\\gangster barber\\\\\\\\.claude\\\\\\\\worktrees\\\\\\\\optimistic-haibt-485073\")",
+      "Bash(cat \"D:\\\\\\\\gangster barber\\\\\\\\.claude\\\\\\\\worktrees\\\\\\\\optimistic-haibt-485073\\\\\\\\.git\")"
+    ]
+  }
+}
